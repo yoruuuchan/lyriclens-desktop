@@ -841,7 +841,18 @@ function renderLyrics() {
   // it. We still compute the *real* idx for now-playing-strip purposes,
   // but the rendered view is locked.
   const liveIdx = computeActiveIdx(pos);
-  const activeIdx = state.followPaused ? state.frozenActiveIdx : liveIdx;
+  // Detect "lyrics have no usable timeline" — happens when LRCLIB only
+  // had plainLyrics and we fell back to text-with-timeMs=0. Without
+  // this guard computeActiveIdx returns the LAST line forever (every
+  // 0 <= pos), pinning the card view to whatever the last plain line
+  // says — for ninelie that was the literal "(End)" marker at the
+  // bottom of a romaji transliteration.
+  const lyricsHaveTimeline = state.lines.some((line) => line.timeMs > 0);
+  const activeIdx = state.followPaused
+    ? state.frozenActiveIdx
+    : lyricsHaveTimeline
+      ? liveIdx
+      : -1;
   container.classList.toggle("is-paused", state.followPaused);
   // Timeline health drives the layout: when SMTC isn't giving us a
   // usable position (NetEase/QQ Win32 = `metadata_only`, sources that
@@ -850,7 +861,12 @@ function renderLyrics() {
   // still has a position, just jittery — we keep per-line sync and let
   // the status line warn the user. `timeline_candidate` is good enough
   // for per-line; we only fail closed on metadata_only/dead.
+  //
+  // The lyric-side fallback (`!lyricsHaveTimeline`) joins the same
+  // bucket because the symptom is identical: no anchor for a single
+  // card, but a complete set of LLM cards that should still be shown.
   const noTimeline =
+    !lyricsHaveTimeline ||
     state.timelineHealth === "metadata_only" ||
     state.timelineHealth === "timeline_dead";
   const expandAll =
