@@ -131,11 +131,26 @@ Structural rules:
 - original must be the exact original lyric, do not rewrite.`;
 }
 
+// "中文" / "Chinese" by themselves are ambiguous — for Japanese → Chinese
+// translation in particular, the bare label tends to push models toward
+// Traditional (Taiwan/HK fansub tradition leaks into training data).
+// Pin it down explicitly. Anything else passes through verbatim so users
+// who want Japanese / English / etc. — or who explicitly typed 繁体中文
+// — get exactly what they asked for.
+function clarifyTargetLanguage(target: string): string {
+  const trimmed = target.trim();
+  if (/^(中文|chinese)$/i.test(trimmed)) {
+    return "简体中文 (Simplified Chinese)";
+  }
+  return trimmed;
+}
+
 export function buildDefaultFocus(
-  targetLanguage: string,
+  rawTargetLanguage: string,
   points: KnowledgePoint[],
   isSelected: boolean,
 ): string {
+  const targetLanguage = clarifyTargetLanguage(rawTargetLanguage);
   const validPoints = points.filter((p) => KNOWLEDGE_POINT_SNIPPETS[p]);
   const focusLines = validPoints.map(
     (k) => `- type "${k}" — ${KNOWLEDGE_POINT_SNIPPETS[k]}`,

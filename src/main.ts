@@ -104,7 +104,7 @@ const DEFAULT_SETTINGS: Settings = {
   apiEndpoint: "",
   apiKey: "",
   modelName: "",
-  targetLanguage: "中文",
+  targetLanguage: "简体中文",
   knowledgePoints: [...VALID_POINTS],
   customPrompt: "",
   cardGenerationMode: "per-line",
