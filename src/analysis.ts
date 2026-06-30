@@ -472,6 +472,47 @@ async function postChatCompletion(
   return parseCompletionJson(content);
 }
 
+// Per-line mode against a long lyric (Brave Shine = 47 lines) blows past
+// the 4096-max-tokens budget — each card is ~85 tokens, so 47 cards ≈ 4k
+// of model output, almost always truncated mid-JSON. Splitting into
+// concurrent batches of this size keeps each request well under the
+// budget AND gets us back to a single round-trip's worth of wall-clock
+// time. 25 is conservative on purpose: with 4-point cards + Chinese
+// translations a batch comes in around 2k tokens, leaving headroom for
+// the system prompt and the model's pre-amble.
+const PER_LINE_BATCH_SIZE = 25;
+
+async function runChatWithFallback(
+  url: string,
+  settings: AnalysisSettings,
+  language: string,
+  lines: AnalysisInputLine[],
+  signal: AbortSignal,
+): Promise<unknown> {
+  const formattedLyrics = formatLyricsForPrompt(lines);
+  try {
+    return await postChatCompletion(
+      url,
+      settings,
+      language,
+      formattedLyrics,
+      settings.responseFormatMode,
+      signal,
+    );
+  } catch (err) {
+    // Some providers reject `response_format: json_object`. When the user
+    // left this on "auto", silently retry without it. Anything else is a
+    // real failure and bubbles up to the caller's fallback logic.
+    const e = err as Error & { status?: number; responseText?: string };
+    const unsupportedResponseFormat =
+      e.status === 400 &&
+      settings.responseFormatMode === "auto" &&
+      /response_format|response format/i.test(e.responseText ?? "");
+    if (!unsupportedResponseFormat) throw err;
+    return postChatCompletion(url, settings, language, formattedLyrics, "off", signal);
+  }
+}
+
 export async function requestAnalysis(
   settings: AnalysisSettings,
   lines: AnalysisInputLine[],
@@ -482,7 +523,6 @@ export async function requestAnalysis(
   if (!lines.length) return [];
 
   const url = normalizeEndpoint(settings.apiEndpoint);
-  const formattedLyrics = formatLyricsForPrompt(lines);
   const language = detectLanguageFromLines(lines);
   const timeoutMs = Math.max(15, settings.analyzeTimeoutSecs) * 1000;
   const controller = new AbortController();
@@ -495,33 +535,56 @@ export async function requestAnalysis(
   }
 
   try {
-    let parsed: unknown;
-    try {
-      parsed = await postChatCompletion(
+    const isSelected = settings.cardGenerationMode === "selected";
+    const shouldBatch = !isSelected && lines.length > PER_LINE_BATCH_SIZE;
+
+    if (!shouldBatch) {
+      const parsed = await runChatWithFallback(
         url,
         settings,
         language,
-        formattedLyrics,
-        settings.responseFormatMode,
+        lines,
         controller.signal,
       );
-    } catch (err) {
-      const e = err as Error & { status?: number; responseText?: string };
-      const unsupportedResponseFormat =
-        e.status === 400 &&
-        settings.responseFormatMode === "auto" &&
-        /response_format|response format/i.test(e.responseText ?? "");
-      if (!unsupportedResponseFormat) throw err;
-      parsed = await postChatCompletion(
-        url,
-        settings,
-        language,
-        formattedLyrics,
-        "off",
-        controller.signal,
-      );
+      return normalizeCards(parsed, lines);
     }
-    return normalizeCards(parsed, lines);
+
+    // Per-line mode + long lyric → fan out into concurrent chunks. Each
+    // chunk's lines keep their original index, so when the LLM honors
+    // "lineIndex must match input" the cards merge back into the right
+    // slots. If the model resets to 0-based per batch (some do),
+    // normalizeCards' position-based rescue inside each chunk catches it
+    // because the chunk-local fallback maps cardIndex → lines[cardIndex],
+    // which is the correct global line in this slice.
+    const chunks: AnalysisInputLine[][] = [];
+    for (let i = 0; i < lines.length; i += PER_LINE_BATCH_SIZE) {
+      chunks.push(lines.slice(i, i + PER_LINE_BATCH_SIZE));
+    }
+
+    // Promise.all → any single batch failure rejects the whole call. That
+    // hands control back to main.ts's fallback path (selected mode with
+    // a tighter token budget), which is the right tradeoff: a partial
+    // per-line result with random gaps would be more confusing than
+    // dropping to the curated 6–8 picks.
+    const batchResults = await Promise.all(
+      chunks.map((chunk) =>
+        runChatWithFallback(url, settings, language, chunk, controller.signal).then(
+          (parsed) => normalizeCards(parsed, chunk),
+        ),
+      ),
+    );
+
+    const merged = new Map<number, AnalysisCard>();
+    for (const cards of batchResults) {
+      for (const card of cards) {
+        // First-write-wins: if two batches somehow claim the same
+        // lineIndex (shouldn't happen, but be defensive), trust the
+        // first one. The position-based rescue inside each chunk only
+        // maps within its own slice, so collisions are exceptional.
+        if (!merged.has(card.lineIndex)) merged.set(card.lineIndex, card);
+      }
+    }
+    return Array.from(merged.values()).sort((a, b) => a.lineIndex - b.lineIndex);
   } catch (err) {
     if ((err as Error)?.name === "AbortError") {
       throw new Error("分析请求超时。");
