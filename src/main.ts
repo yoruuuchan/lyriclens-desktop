@@ -346,6 +346,11 @@ const state = {
     cards: new Map<number, AnalysisCard>(),
     message: "",
     controller: null as AbortController | null,
+    // True when the current ready state came back from analysis-cache
+    // instead of a fresh LLM call. Swaps the card's right-side badge
+    // from "ready" to "cached" so cache hits are visible without
+    // opening DevTools.
+    fromCache: false,
   },
   settings: loadSettings(),
   dirty: false,
@@ -548,11 +553,20 @@ function resetAnalysis(trackKeyValue = "") {
   state.analysis.cards = new Map();
   state.analysis.message = "";
   state.analysis.controller = null;
+  state.analysis.fromCache = false;
 }
 
 function renderAnalysisCard(card: AnalysisCard): string {
   const start = card.startMs;
   const time = Number.isFinite(start) && start !== null ? ` · ${formatTime(start)}` : "";
+  // fromCache flips this badge to "cached" on cache-hit replays, so the
+  // user can spot a hit without opening DevTools. The state is per-
+  // analysis (all cards from one run share the same source), so reading
+  // the global flag is correct.
+  const statusBadge = state.analysis.fromCache ? "cached" : "ready";
+  const badgeClass = state.analysis.fromCache
+    ? "analysis-status is-cached"
+    : "analysis-status";
   const translation = card.translation.trim()
     ? `<div class="translation-block">
         <span class="translation-label">translation</span>
@@ -578,7 +592,7 @@ function renderAnalysisCard(card: AnalysisCard): string {
         <span class="analysis-dot" aria-hidden="true"></span>
         <span class="analysis-title">analysis${time}</span>
       </div>
-      <span class="analysis-status">ready</span>
+      <span class="${badgeClass}">${statusBadge}</span>
     </div>
     ${translation}
     ${points ? `<div class="point-list">${points}</div>` : ""}
@@ -717,6 +731,7 @@ async function startAnalysisForTrack(trackKeyValue: string, lines: LyricLine[]) 
     state.analysis.status = "ready";
     state.analysis.cards = new Map(cached.map((card) => [card.lineIndex, card]));
     state.analysis.message = "";
+    state.analysis.fromCache = true;
     renderLyrics();
     return;
   }
@@ -741,6 +756,7 @@ async function startAnalysisForTrack(trackKeyValue: string, lines: LyricLine[]) 
     state.analysis.status = "ready";
     state.analysis.cards = new Map(cards.map((card) => [card.lineIndex, card]));
     state.analysis.message = "";
+    state.analysis.fromCache = false;
   } catch (err) {
     if (!stillCurrent()) return;
 
@@ -790,6 +806,7 @@ async function startAnalysisForTrack(trackKeyValue: string, lines: LyricLine[]) 
       state.analysis.status = "ready";
       state.analysis.cards = new Map(cards.map((card) => [card.lineIndex, card]));
       state.analysis.message = "";
+      state.analysis.fromCache = false;
     } catch (err2) {
       if (!stillCurrent()) return;
       state.analysis.status = "error";

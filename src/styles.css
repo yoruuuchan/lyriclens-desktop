@@ -388,6 +388,13 @@ body {
   white-space: nowrap;
 }
 
+/* Cards rehydrated from analysis-cache get a subtle primary tint so
+   cache hits are visible at a glance — same shape, different reading. */
+.analysis-status.is-cached {
+  background: var(--primary-50);
+  color: var(--primary-700);
+}
+
 .translation-block {
   padding: var(--space-3);
   border-radius: var(--radius-md);
