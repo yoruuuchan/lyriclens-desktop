@@ -13,6 +13,68 @@ tags: `[plan]` route decision / `[ship]` shipped functionality / `[probe]` probe
 
 ---
 
+## 2026-07-01 [ship] 阶段 3 第 1+2 步 + 笔记本独立 overlay + 一堆 polish
+
+桌面版第三个连续 session 收工，6 条 PR 全 merged，Yoru 真机一路验过。阶段 3 主菜推完一半（第 1+2 步），笔记本从 settings tab 提升为主页右上角独立 overlay，附带踩到 worktree+junction 把 node_modules 删空的坑（已写 memory）。
+
+PR 列表（时间序）：
+
+- **[#15](https://github.com/yoruuuchan/lyriclens-desktop/pull/15) feat(notebook): SQLite store + typed Rust commands** —— 阶段 3 第 1 步
+  - `src-tauri/src/notebook.rs`：NotebookEntry / AnalysisCard / AnalysisPoint serde structs（camelCase 自动对齐前端），`open_db` / `ensure_schema` / `upsert` / `list` / `remove` + 5 unit tests
+  - `lib.rs`：setup hook 在 `app_data_dir/notebook.sqlite` 开 DB，State 存 `tokio::Mutex<Connection>`，三条 invoke commands；`CmdError::Storage` 新 kind
+  - `src/notebook.ts`：typed shim + `makeSongKey`（schema-canonical trim+lowercase）+ `newEntryId`
+  - 选 rusqlite (bundled) 而非 tauri-plugin-sql：schema 文档要求 strict 校验（uuid v4 / `starredAt ≤ updatedAt` / source enum），Rust 端校验 JS 绕不过
+  - SQL UNIQUE(song_key, line_index) + ON CONFLICT 保留 id / starred_at / source
+
+- **[#18](https://github.com/yoruuuchan/lyriclens-desktop/pull/18) feat(notebook): star button + notebook tab + note sheet + cache clear** —— 阶段 3 第 2 步 UI 全套 + 备选 B
+  - 卡片右上角 ★ button（ember toggle，事件代理在 lyrics container 上）
+  - 笔记本 tab in settings overlay（**后被 PR #21 移出**）
+  - 备注编辑 sheet（浮在 overlay 之上，ESC / cancel / backdrop 关闭）
+  - 高级 tab 加"分析缓存清空"section
+  - 关于 tab 加"数据来源 · 致谢"（lrclib.net + CC0 + CF Worker 镜像）
+  - 教训：PR #17 是 stacked PR，merge 之后没进 main（GitHub 不会自动 rebase 到新 base），手动 rebase + 重开为 #18
+
+- **[#19](https://github.com/yoruuuchan/lyriclens-desktop/pull/19) fix(notebook): render points + LLM note; add batch select + delete**
+  - Bug：`renderNotebookEntry` 漏写 card.points + card.note；数据是好的，只是 UI 没画
+  - 批量选择 + 删除：每条 checkbox，slide-in batch bar 显示"已选 N / M / 全选 / 取消全选 / 删除选中"
+  - `Promise.allSettled` 跑并发删，一条失败不带垮其他
+  - dev.ps1 UTF-8 fix：`chcp 65001` + `OutputEncoding` 防 zh-CN cp936 把 `▸` 乱码成 `鈻?`
+
+- **[#20](https://github.com/yoruuuchan/lyriclens-desktop/pull/20) polish(notebook): rebuild entry layout with hero line + meta strip**
+  - Yoru 真机说"没有视觉重心" → 重做成三段式（meta / body / actions），段间 hairline
+  - head：`☐ Title · Artist ............. 00:30` 紧凑 meta strip
+  - body hero：原文 text-lg + medium + JP 字体；翻译 italic ink-2 紧贴下方（**去掉灰底块**）
+  - userNote 空时隐藏（不再"尚无备注"占位），按钮 label "加备注" / "编辑备注" 切换
+  - userNote 用 primary tint 块 + 2px primary 强调条，跟 LLM material 视觉区分
+
+- **[#21](https://github.com/yoruuuchan/lyriclens-desktop/pull/21) feat(notebook): promote from settings tab to first-class overlay**
+  - Yoru 说"笔记本入口不要做在设置里" → 主页右上角加 book icon，独立 notebook overlay
+  - 复用 `.settings-overlay` CSS class 只为 layout / 动画一致（DOM 上是同级 peer）
+  - settings 里的笔记本 tab 整个删
+
+- **[#22](https://github.com/yoruuuchan/lyriclens-desktop/pull/22) fix(layout): stop horizontal-scroll when window shrinks**
+  - Yoru 真机拉窄窗口，长 album 名（"Aimer · 六等星の夜 / 悲しみはオーロラに / TWINKLE TWINKLE LITTLE STAR"）撑出水平滚动条
+  - 根因：`.app` grid 没声明 `grid-template-columns`，隐式列默认 `max-content`，nowrap 长 child 把列锁过 viewport
+  - 修：`grid-template-columns: minmax(0, 1fr)` + `html, body { overflow-x: hidden }`
+
+附加事件：
+- **另一个窗口 PR #16** 并行做了 README 更新（描述网络根治 + plain-only fallback 体验），零文件冲突
+- **worktree + junction 踩坑**：`git worktree remove` 跟着 `mklink /J` 删空了 desktop 的 node_modules；`npm install` 重装 25 包修复；教训写到 [`feedback_worktree_junction.md`](../../../../.claude/projects/D--lyriclens-desktop/memory/feedback_worktree_junction.md)
+
+真机重大发现：
+- **rusqlite + bundled SQLite 工作良好**：MSVC 首次 build 几十秒，增量 build 不慢，运行时无额外依赖
+- **GitHub stacked PR 不会自动 rebase** 到新 base：上游 PR merge 后，stacked PR 的 base 还是死链分支，merge 进去不会进 main
+- **CSS Grid layout 经典坑**：grid container 没显式 grid-template-columns 时，隐式列是 max-content 不是 1fr，nowrap 长 child 会撑过 viewport
+- **PowerShell zh-CN 默认 cp936**，box-drawing / 表情符号显示要 `chcp 65001` + `OutputEncoding = UTF8` 双管齐下
+
+下一站：
+- 阶段 3 第 3 步：**Anki CSV 导出**（半天）。schema 文档列格式已锁，要加 `tauri-plugin-dialog` + 新 Rust command 写文件
+- 阶段 3 第 4 步：JSON import/export + 合并规则（半天-1 天）
+- trackKey() ↔ makeSongKey() 收敛（小，会让 cache invalidate 一次）
+- 词库基建（可并行）：Bluskyo JLPT KV 部署 + Rust client + badge UI
+
+详细交接看 [HANDOFF-2026-07-01-session3.md](HANDOFF-2026-07-01-session3.md)。
+
 ## 2026-07-01 [ship] 阶段 3 第 0 步 + 国内连接根治 + ninelie 烂源修复
 
 桌面版一夜 6 条 PR 全 merged。阶段 3 主菜的"第 0 步 cache"做完，国内连不上 lrclib.net 的老问题用 Cloudflare Worker 反代根治了，发现并修了 ninelie 那条暴露的 LRCLIB 候选排序 + plain-only 时间轴回落 bug。
