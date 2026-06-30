@@ -5,7 +5,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   analysisSettingsSignature,
   buildDefaultFocus,
@@ -28,6 +28,7 @@ import {
 import {
   exportEntriesAnkiToPath,
   exportEntriesJsonToPath,
+  importEntriesFromPath,
   listEntries,
   makeSongKey,
   newEntryId,
@@ -351,6 +352,7 @@ const el = {
   notebookCount: () => $("#notebook-count"),
   notebookList: () => $("#notebook-list"),
   notebookRefresh: () => $<HTMLButtonElement>("#btn-notebook-refresh"),
+  notebookImportJson: () => $<HTMLButtonElement>("#btn-notebook-import-json"),
   notebookExportJson: () => $<HTMLButtonElement>("#btn-notebook-export-json"),
   notebookExportAnki: () => $<HTMLButtonElement>("#btn-notebook-export-anki"),
   notebookBatchBar: () => $("#notebook-batch-bar"),
@@ -1035,6 +1037,48 @@ async function exportNotebookAs(format: ExportFormat): Promise<void> {
         : String(err);
     console.warn(`notebook export (${format}) failed`, err);
     showToast(`导出失败 · ${msg}`);
+  }
+}
+
+async function importNotebookJson(): Promise<void> {
+  let path: string | string[] | null;
+  try {
+    path = await openDialog({
+      title: "导入笔记本 JSON",
+      multiple: false,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+  } catch (err) {
+    console.warn("notebook import · open dialog failed", err);
+    showToast("打开文件对话框失败");
+    return;
+  }
+  if (!path || Array.isArray(path)) return; // cancelled or unexpected shape
+
+  try {
+    const summary = await importEntriesFromPath(path);
+    // Refresh both the in-memory map (lyric view reads from it) and the
+    // notebook panel; import may have changed any entry's userNote /
+    // card snapshot so a render with stale data would mislead.
+    await loadNotebookEntries();
+    state.lastLyricsHtml = "";
+    renderLyrics();
+    if (state.notebookPanelOpen) renderNotebookPanel();
+    showToast(
+      `导入完成 · 新 ${summary.imported} · 合并 ${summary.merged} · 跳过 ${summary.skipped}`,
+    );
+    if (summary.errors.length > 0) {
+      // Detail messages get logged for the user to inspect via
+      // DevTools; the toast itself stays terse so it doesn't overflow.
+      console.warn(`notebook import: ${summary.errors.length} entries had errors`, summary.errors);
+    }
+  } catch (err) {
+    const msg =
+      typeof err === "object" && err && "message" in err
+        ? (err as { message?: string }).message ?? String(err)
+        : String(err);
+    console.warn("notebook import failed", err);
+    showToast(`导入失败 · ${msg}`);
   }
 }
 
@@ -2268,6 +2312,9 @@ function bindSettingsForm() {
       await loadNotebookEntries();
       renderNotebookPanel();
     })();
+  });
+  el.notebookImportJson().addEventListener("click", () => {
+    void importNotebookJson();
   });
   el.notebookExportJson().addEventListener("click", () => {
     void exportNotebookAs("json");
