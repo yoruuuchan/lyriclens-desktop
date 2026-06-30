@@ -1223,3 +1223,102 @@ button.primary:active { box-shadow: inset 2px 2px 4px rgba(0, 0, 0, 0.18); }
   z-index: 20;
 }
 .save-toast.show { opacity: 1; }
+
+/* ─── debug panel ──────────────────────────────────────────── */
+
+.debug-block { display: flex; flex-direction: column; gap: var(--space-3); }
+.debug-block .placeholder {
+  color: var(--ink-4);
+  font-size: var(--text-xs);
+  padding: var(--space-3) 0;
+}
+
+.debug-card {
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--bg-surface);
+}
+
+.debug-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line-1);
+}
+
+.debug-card-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.debug-source {
+  font-size: var(--text-2xs);
+  color: var(--ink-3);
+  word-break: break-all;
+}
+
+.debug-track {
+  font-size: var(--text-sm);
+  color: var(--ink-1);
+  font-weight: var(--weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debug-grid .kv-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 4px 0;
+  gap: var(--space-3);
+}
+.debug-grid .kv-row + .kv-row { border-top: 1px solid var(--line-1); }
+.debug-grid .kv-val { word-break: break-all; text-align: right; }
+
+.health-badge {
+  display: inline-block;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-2xs);
+  font-family: var(--font-mono);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-wide);
+  white-space: nowrap;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+}
+
+.health-badge.health-timeline-healthy {
+  color: var(--success-500);
+  border-color: color-mix(in srgb, var(--success-500) 35%, transparent);
+  background: color-mix(in srgb, var(--success-500) 12%, transparent);
+}
+.health-badge.health-timeline-candidate {
+  color: var(--success-500);
+  border-color: color-mix(in srgb, var(--success-500) 25%, transparent);
+  background: color-mix(in srgb, var(--success-500) 6%, transparent);
+}
+.health-badge.health-timeline-unstable,
+.health-badge.health-metadata-only {
+  color: var(--warning-500);
+  border-color: color-mix(in srgb, var(--warning-500) 35%, transparent);
+  background: color-mix(in srgb, var(--warning-500) 12%, transparent);
+}
+.health-badge.health-timeline-dead {
+  color: var(--error-500);
+  border-color: color-mix(in srgb, var(--error-500) 35%, transparent);
+  background: color-mix(in srgb, var(--error-500) 12%, transparent);
+}
+.health-badge.health-unknown {
+  color: var(--ink-3);
+  border-color: var(--line-2);
+  background: transparent;
+}

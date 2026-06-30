@@ -61,6 +61,7 @@
           <button class="settings-tab is-active" data-tab="general" role="tab" type="button">常规</button>
           <button class="settings-tab" data-tab="ai" role="tab" type="button">AI 服务</button>
           <button class="settings-tab" data-tab="advanced" role="tab" type="button">高级</button>
+          <button class="settings-tab" data-tab="debug" role="tab" type="button">调试</button>
           <button class="settings-tab" data-tab="about" role="tab" type="button">关于</button>
         </div>
 
@@ -273,6 +274,24 @@
               <div class="field">
                 <label for="cfg-fb-tokens">重试 Tokens</label>
                 <input type="number" id="cfg-fb-tokens" min="256" max="16000" step="64" />
+              </div>
+            </section>
+          </div>
+
+          <!-- ─── 调试 ─────────────────────────────────────────── -->
+          <div class="tab-panel" data-tab="debug">
+            <section class="settings-section">
+              <div class="section-title">当前会话 timeline 健康度</div>
+              <p class="about-copy" style="margin-bottom: var(--space-2);">这里展示 LyricLens 跟随的 SMTC 当前会话原始字段，以及我们对 timeline 的分类。报告"看不到卡片"时把这一页截图给我们就行，可以省掉一轮排查。</p>
+              <div id="debug-current" class="debug-block">
+                <p class="placeholder">等待第一帧 SMTC 数据…</p>
+              </div>
+            </section>
+            <section class="settings-section">
+              <div class="section-title">全部 SMTC 会话</div>
+              <p class="about-copy" style="margin-bottom: var(--space-2);">Windows 当前知道的所有 media session（包括没被选作 current 的）。Chrome、Edge、Spotify 同时开着的时候这里会有多条。</p>
+              <div id="debug-all-sessions" class="debug-block">
+                <p class="placeholder">等待第一帧 SMTC 数据…</p>
               </div>
             </section>
           </div>
