@@ -3,6 +3,11 @@ mod smtc;
 
 use serde::Serialize;
 
+// Per-kind variants so the frontend can decide whether to show
+// "请求超时", "连不上 LRCLIB", "LRCLIB 服务异常 (HTTP NNN)", or just
+// the raw message. Without these, every transport failure rendered as
+// the same "查询出错 · http error: ..." string with reqwest internals
+// leaking through.
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind")]
 enum CmdError {
@@ -10,6 +15,12 @@ enum CmdError {
     NoSession,
     #[serde(rename = "not_found")]
     NotFound,
+    #[serde(rename = "timeout")]
+    Timeout { message: String },
+    #[serde(rename = "connect")]
+    Connect { message: String },
+    #[serde(rename = "http_status")]
+    HttpStatus { message: String, status: u16 },
     #[serde(rename = "error")]
     Other { message: String },
 }
@@ -27,7 +38,13 @@ impl From<lrclib::LrcError> for CmdError {
     fn from(err: lrclib::LrcError) -> Self {
         match err {
             lrclib::LrcError::NotFound => CmdError::NotFound,
-            other => CmdError::Other { message: other.to_string() },
+            lrclib::LrcError::Timeout(message) => CmdError::Timeout { message },
+            lrclib::LrcError::Connect(message) => CmdError::Connect { message },
+            lrclib::LrcError::Status(status) => CmdError::HttpStatus {
+                message: format!("HTTP {status}"),
+                status,
+            },
+            lrclib::LrcError::Http(message) => CmdError::Other { message },
         }
     }
 }

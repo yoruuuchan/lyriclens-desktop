@@ -38,14 +38,37 @@ pub struct LyricResult {
     pub synced_lyrics: Option<String>,
 }
 
+// Split out so the frontend can show "请求超时" vs "连不上 LRCLIB" vs
+// "LRCLIB 服务异常" instead of a raw reqwest debug string. Transport-
+// level failures (Timeout, Connect) are the ones worth retrying — the
+// caller does that inside send_with_retry below. Status / Http / Decode
+// errors are server-shaped and a retry won't change the outcome.
 #[derive(Debug, thiserror::Error)]
 pub enum LrcError {
     #[error("not found")]
     NotFound,
+    #[error("timed out: {0}")]
+    Timeout(String),
+    #[error("connect failed: {0}")]
+    Connect(String),
     #[error("http error: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(String),
     #[error("unexpected status: {0}")]
     Status(u16),
+}
+
+impl From<reqwest::Error> for LrcError {
+    fn from(e: reqwest::Error) -> Self {
+        if e.is_timeout() {
+            LrcError::Timeout(e.to_string())
+        } else if e.is_connect() {
+            LrcError::Connect(e.to_string())
+        } else {
+            // Decode errors, redirect loops, builder errors, etc. — generic
+            // bucket. Not retried because they're not transport flakes.
+            LrcError::Http(e.to_string())
+        }
+    }
 }
 
 fn client() -> Result<reqwest::Client, reqwest::Error> {
@@ -53,6 +76,37 @@ fn client() -> Result<reqwest::Client, reqwest::Error> {
         .user_agent(USER_AGENT)
         .timeout(std::time::Duration::from_secs(15))
         .build()
+}
+
+// One retry on transient transport failures (timeout / connect). 500ms
+// backoff before the second attempt — short enough that the user
+// doesn't visibly wait, long enough to ride out a momentary blip
+// (TLS handshake reset, DNS hiccup). HTTP-status errors and decode
+// errors short-circuit out of the loop because retry won't fix them.
+//
+// Takes a builder closure rather than a RequestBuilder so each attempt
+// constructs a fresh request — RequestBuilder isn't Clone in the
+// public API and try_clone() returns Option, both clumsier than this.
+async fn send_with_retry(
+    make_req: impl Fn() -> reqwest::RequestBuilder,
+) -> Result<reqwest::Response, LrcError> {
+    let mut last_err: Option<LrcError> = None;
+    for attempt in 0..=1u32 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+        match make_req().send().await {
+            Ok(resp) => return Ok(resp),
+            Err(e) => {
+                let transient = e.is_timeout() || e.is_connect();
+                last_err = Some(LrcError::from(e));
+                if !transient {
+                    break;
+                }
+            }
+        }
+    }
+    Err(last_err.expect("retry loop must observe at least one error before exit"))
 }
 
 /// Direct lookup. LRCLIB applies its own normalization, so passing the raw
@@ -64,20 +118,22 @@ pub async fn get(
     duration_secs: Option<f64>,
 ) -> Result<LyricResult, LrcError> {
     let client = client()?;
-    let mut req = client
-        .get(format!("{}/get", BASE_URL))
-        .query(&[("track_name", track_name), ("artist_name", artist_name)]);
-    if let Some(album) = album_name {
-        if !album.is_empty() {
-            req = req.query(&[("album_name", album)]);
+    let resp = send_with_retry(|| {
+        let mut req = client
+            .get(format!("{}/get", BASE_URL))
+            .query(&[("track_name", track_name), ("artist_name", artist_name)]);
+        if let Some(album) = album_name {
+            if !album.is_empty() {
+                req = req.query(&[("album_name", album)]);
+            }
         }
-    }
-    if let Some(dur) = duration_secs {
-        // LRCLIB expects an integer-second duration.
-        req = req.query(&[("duration", format!("{:.0}", dur))]);
-    }
-
-    let resp = req.send().await?;
+        if let Some(dur) = duration_secs {
+            // LRCLIB expects an integer-second duration.
+            req = req.query(&[("duration", format!("{:.0}", dur))]);
+        }
+        req
+    })
+    .await?;
     match resp.status().as_u16() {
         200 => Ok(resp.json::<LyricResult>().await?),
         404 => Err(LrcError::NotFound),
@@ -111,11 +167,12 @@ pub async fn search(
     duration_secs: Option<f64>,
 ) -> Result<LyricResult, LrcError> {
     let client = client()?;
-    let resp = client
-        .get(format!("{}/search", BASE_URL))
-        .query(&[("track_name", track_name), ("artist_name", artist_name)])
-        .send()
-        .await?;
+    let resp = send_with_retry(|| {
+        client
+            .get(format!("{}/search", BASE_URL))
+            .query(&[("track_name", track_name), ("artist_name", artist_name)])
+    })
+    .await?;
     if !resp.status().is_success() {
         return Err(LrcError::Status(resp.status().as_u16()));
     }
