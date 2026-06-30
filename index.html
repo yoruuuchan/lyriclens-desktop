@@ -17,6 +17,14 @@
             <button class="icon" id="btn-theme" type="button" title="切换主题" aria-label="切换主题">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" id="theme-icon"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
             </button>
+            <button class="icon" id="btn-notebook" type="button" title="笔记本" aria-label="笔记本">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" aria-hidden="true">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                <path d="M9 6h7"/>
+                <path d="M9 10h5"/>
+              </svg>
+            </button>
             <button class="icon" id="btn-settings" type="button" title="设置" aria-label="设置">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
@@ -71,7 +79,6 @@
           <button class="settings-tab is-active" data-tab="general" role="tab" type="button">常规</button>
           <button class="settings-tab" data-tab="ai" role="tab" type="button">AI 服务</button>
           <button class="settings-tab" data-tab="advanced" role="tab" type="button">高级</button>
-          <button class="settings-tab" data-tab="notebook" role="tab" type="button">笔记本</button>
           <button class="settings-tab" data-tab="debug" role="tab" type="button">调试</button>
           <button class="settings-tab" data-tab="about" role="tab" type="button">关于</button>
         </div>
@@ -301,25 +308,6 @@
             </section>
           </div>
 
-          <!-- ─── 笔记本 ───────────────────────────────────────── -->
-          <div class="tab-panel" data-tab="notebook">
-            <section class="settings-section">
-              <div class="section-title">收藏的卡片</div>
-              <div class="notebook-toolbar">
-                <span class="notebook-count" id="notebook-count">—</span>
-                <button id="btn-notebook-refresh" type="button">刷新</button>
-              </div>
-              <div id="notebook-batch-bar" class="notebook-batch-bar" role="region" aria-label="批量操作"></div>
-              <div id="notebook-list" class="notebook-list">
-                <p class="placeholder">尚未加载…</p>
-              </div>
-            </section>
-            <section class="settings-section">
-              <div class="section-title">关于笔记本</div>
-              <p class="about-copy">在歌词卡片右上角点 ★ 把整张卡片存进来。每行歌词唯一一条记录，再次点击同行会同步最新卡片快照（id 和首次收藏时间保留）。导入 / 导出 Anki 等功能在后续版本上线。</p>
-            </section>
-          </div>
-
           <!-- ─── 调试 ─────────────────────────────────────────── -->
           <div class="tab-panel" data-tab="debug">
             <section class="settings-section">
@@ -415,6 +403,43 @@
           <span class="footer-status" id="footer-status">已应用</span>
           <button id="btn-settings-cancel" type="button">取消</button>
           <button id="btn-settings-save" class="primary" type="button">保存设置</button>
+        </div>
+      </section>
+
+      <!-- ═══ notebook overlay (independent of settings) ═══════
+           Reuses the .settings-overlay class for layout/animation
+           parity, but is its own full-screen surface — opened from
+           the main-toolbar notebook button, dismissed by its own ×. -->
+      <section class="settings-overlay" id="notebook-overlay" aria-hidden="true">
+        <div class="settings-header">
+          <div class="brand">
+            <div class="brand-mark" aria-hidden="true">N</div>
+            <div class="brand-text">
+              <div class="brand-name">笔记本</div>
+              <div class="brand-sub">收藏的学习卡片</div>
+            </div>
+          </div>
+          <button class="icon close-btn" id="btn-notebook-close" type="button" title="关闭" aria-label="关闭">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        <div class="settings-body">
+          <section class="settings-section">
+            <div class="section-title">收藏的卡片</div>
+            <div class="notebook-toolbar">
+              <span class="notebook-count" id="notebook-count">—</span>
+              <button id="btn-notebook-refresh" type="button">刷新</button>
+            </div>
+            <div id="notebook-batch-bar" class="notebook-batch-bar" role="region" aria-label="批量操作"></div>
+            <div id="notebook-list" class="notebook-list">
+              <p class="placeholder">尚未加载…</p>
+            </div>
+          </section>
+          <section class="settings-section">
+            <div class="section-title">关于笔记本</div>
+            <p class="about-copy">在歌词卡片右上角点 ★ 把整张卡片存进来。每行歌词唯一一条记录，再次点击同行会同步最新卡片快照（id 和首次收藏时间保留）。导入 / 导出 Anki 等功能在后续版本上线。</p>
+          </section>
         </div>
       </section>
 
