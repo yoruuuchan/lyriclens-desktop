@@ -39,6 +39,16 @@
 
       <footer class="actions">
         <button id="btn-refresh" type="button">重新拉取</button>
+        <button id="btn-pause-follow" class="ll-pause-follow" type="button" aria-pressed="false" title="冻结当前画面，方便慢慢学">
+          <svg class="pause-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="6" y="5" width="4" height="14" rx="1"/>
+            <rect x="14" y="5" width="4" height="14" rx="1"/>
+          </svg>
+          <svg class="resume-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polygon points="6 4 20 12 6 20 6 4"/>
+          </svg>
+          <span class="pause-follow-label">暂停跟随</span>
+        </button>
         <span class="hint" id="hint">每秒轮询</span>
       </footer>
 

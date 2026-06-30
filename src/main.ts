@@ -279,6 +279,8 @@ const el = {
   timing: () => $("#np-timing"),
   lyrics: () => $("#lyrics"),
   refresh: () => $<HTMLButtonElement>("#btn-refresh"),
+  pauseFollowBtn: () => $<HTMLButtonElement>("#btn-pause-follow"),
+  pauseFollowLabel: () => $(".pause-follow-label"),
   settingsBtn: () => $<HTMLButtonElement>("#btn-settings"),
   themeBtn: () => $<HTMLButtonElement>("#btn-theme"),
   overlay: () => $("#settings-overlay"),
@@ -368,6 +370,13 @@ const state = {
   // looking.
   allSessions: [] as NowPlaying[],
   debugPanelOpen: false,
+  // While true, the lyric view freezes on `frozenActiveIdx` regardless
+  // of what the playback position actually does. Now-playing strip
+  // keeps showing real position so the user can see where the song
+  // moved to. Auto-cleared on track change — a new song means a new
+  // context, no point in carrying the freeze over.
+  followPaused: false,
+  frozenActiveIdx: -1,
 };
 
 const SNAPSHOT_WINDOW = 5;
@@ -590,6 +599,14 @@ function renderAnalysisSlot(lineIndex: number): string {
 function renderAnalysisStatusLine(activeIdx: number, expandAll: boolean): string {
   const analysis = state.analysis;
   if (!state.trackKey || analysis.trackKey !== state.trackKey) return "";
+  // Paused-follow takes precedence — the user explicitly froze the view
+  // and needs to know that's why playback isn't advancing the highlight.
+  if (state.followPaused) {
+    return `<div class="analysis-status-line setup" role="status">
+      <span class="analysis-dot" aria-hidden="true"></span>
+      <span>已暂停跟随 · 点底部"恢复跟随"回到当前播放位置</span>
+    </div>`;
+  }
   if (analysis.status === "loading") {
     const text = analysis.message
       ? escapeHtml(analysis.message)
@@ -759,14 +776,24 @@ async function startAnalysisForTrack(trackKeyValue: string, lines: LyricLine[]) 
   }
 }
 
+function computeActiveIdx(pos: number): number {
+  let idx = -1;
+  for (let i = 0; i < state.lines.length; i++) {
+    if (state.lines[i].timeMs <= pos) idx = i;
+    else break;
+  }
+  return idx;
+}
+
 function renderLyrics() {
   const container = el.lyrics();
   const pos = extrapolatedPositionMs(state.np);
-  let activeIdx = -1;
-  for (let i = 0; i < state.lines.length; i++) {
-    if (state.lines[i].timeMs <= pos) activeIdx = i;
-    else break;
-  }
+  // While follow is paused, the active line stays where the user froze
+  // it. We still compute the *real* idx for now-playing-strip purposes,
+  // but the rendered view is locked.
+  const liveIdx = computeActiveIdx(pos);
+  const activeIdx = state.followPaused ? state.frozenActiveIdx : liveIdx;
+  container.classList.toggle("is-paused", state.followPaused);
   // Timeline health drives the layout: when SMTC isn't giving us a
   // usable position (NetEase/QQ Win32 = `metadata_only`, sources that
   // stopped reporting = `timeline_dead`), there's no active line to
@@ -806,6 +833,9 @@ function renderLyrics() {
   if (nextHtml === state.lastLyricsHtml) return;
   state.lastLyricsHtml = nextHtml;
   container.innerHTML = nextHtml;
+  // Never auto-scroll while follow is paused — the whole point is to
+  // let the user dwell on a card without the view dragging away.
+  if (state.followPaused) return;
   const active = container.querySelector<HTMLElement>(".line.active");
   if (active) {
     // The inline card renders right after the active line; if we centre
@@ -969,6 +999,10 @@ async function pollSmtc() {
       // previous track's snapshots would mask a broken new track for ~5s.
       state.snapshots = [];
       state.timelineHealth = "unknown";
+      // New song = new context; carrying a freeze from the previous
+      // track would leave the user staring at a card that no longer
+      // matches the song playing.
+      if (state.followPaused) setFollowPaused(false);
       if (state.settings.autoAnalyze) fetchLyricsFor(np);
     }
     pushSnapshot(np);
@@ -981,6 +1015,9 @@ async function pollSmtc() {
       state.lines = [];
       state.snapshots = [];
       state.timelineHealth = "unknown";
+      // No song = no card to dwell on. Release the freeze so the user
+      // doesn't have to think about it when they restart playback.
+      if (state.followPaused) setFollowPaused(false);
       state.lyricsMessage = "没有活跃的 SMTC 会话。播放一首歌就行。";
       resetAnalysis();
     } else {
@@ -1547,6 +1584,32 @@ function bindSettingsForm() {
 
 // ─── boot ────────────────────────────────────────────────────
 
+function setFollowPaused(paused: boolean) {
+  if (state.followPaused === paused) return;
+  state.followPaused = paused;
+  if (paused) {
+    // Capture where we are *right now* so future render passes pin to
+    // this line instead of computing fresh each tick.
+    const pos = extrapolatedPositionMs(state.np);
+    state.frozenActiveIdx = computeActiveIdx(pos);
+  } else {
+    state.frozenActiveIdx = -1;
+  }
+  const btn = el.pauseFollowBtn();
+  if (btn) {
+    btn.setAttribute("aria-pressed", paused ? "true" : "false");
+    btn.title = paused
+      ? "恢复跟随当前播放位置"
+      : "冻结当前画面，方便慢慢学";
+  }
+  const label = el.pauseFollowLabel();
+  if (label) label.textContent = paused ? "恢复跟随" : "暂停跟随";
+  // Force a re-render so the status line + scroll behaviour update
+  // immediately instead of waiting for the next poll tick.
+  state.lastLyricsHtml = "";
+  renderLyrics();
+}
+
 function startLoops() {
   pollSmtc();
   setInterval(pollSmtc, 1_000);
@@ -1557,14 +1620,14 @@ function startLoops() {
   let lastActive = -1;
   setInterval(() => {
     const pos = extrapolatedPositionMs(state.np);
-    let idx = -1;
-    for (let i = 0; i < state.lines.length; i++) {
-      if (state.lines[i].timeMs <= pos) idx = i;
-      else break;
-    }
-    if (idx !== lastActive) {
-      lastActive = idx;
-      renderLyrics();
+    // While follow is paused, the rendered active line never moves —
+    // skip the change-detect path so we don't trigger a wasted render.
+    if (!state.followPaused) {
+      const idx = computeActiveIdx(pos);
+      if (idx !== lastActive) {
+        lastActive = idx;
+        renderLyrics();
+      }
     }
     if (el.timing()) {
       el.timing().textContent = `${formatTime(pos)} / ${formatTime(
@@ -1582,6 +1645,9 @@ window.addEventListener("DOMContentLoaded", () => {
   el.refresh().addEventListener("click", () => {
     state.trackKey = "";
     pollSmtc();
+  });
+  el.pauseFollowBtn().addEventListener("click", () => {
+    setFollowPaused(!state.followPaused);
   });
   el.themeBtn().addEventListener("click", () => {
     const next: Theme = state.settings.theme === "yoru" ? "akari" : "yoru";
