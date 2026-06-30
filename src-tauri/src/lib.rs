@@ -125,6 +125,17 @@ async fn notebook_export_json_to_path(
     Ok(notebook::export_to_path(&conn, std::path::Path::new(&path))?)
 }
 
+// Anki TSV export — same shape as the JSON command: JS picks the path,
+// we write the file, return the entry count for the toast.
+#[tauri::command]
+async fn notebook_export_anki_to_path(
+    db: tauri::State<'_, notebook::DbHandle>,
+    path: String,
+) -> Result<usize, CmdError> {
+    let conn = db.lock().await;
+    Ok(notebook::export_anki_to_path(&conn, std::path::Path::new(&path))?)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -150,6 +161,7 @@ pub fn run() {
             notebook_list,
             notebook_remove,
             notebook_export_json_to_path,
+            notebook_export_anki_to_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
