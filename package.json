@@ -11,8 +11,11 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "^5.2.9",
+    "@fontsource-variable/geist-mono": "^5.2.8",
     "@fontsource/geist": "^5.2.9",
     "@fontsource/geist-mono": "^5.2.8",
+    "@fontsource/noto-sans-sc": "^5.2.9",
     "@fontsource/zen-kaku-gothic-new": "^5.2.7",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2"

@@ -1,12 +1,7 @@
-// Self-host Geist + Geist Mono + Zen Kaku Gothic New so the UI never
-// falls back to system fonts. Vite bundles these so they work offline.
-import "@fontsource/geist/400.css";
-import "@fontsource/geist/500.css";
-import "@fontsource/geist/600.css";
-import "@fontsource/geist-mono/400.css";
-import "@fontsource/geist-mono/500.css";
-import "@fontsource/zen-kaku-gothic-new/400.css";
-import "@fontsource/zen-kaku-gothic-new/500.css";
+// Geist + Geist Mono + Zen Kaku Gothic New are imported at the TOP of
+// styles.css so they load synchronously with the rest of the
+// stylesheet, before this JS module evaluates. Don't move them back
+// here — it would re-introduce a one-frame Segoe UI fallback.
 
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -214,6 +209,65 @@ function normalizeEndpoint(raw: string): string {
   return stripped;
 }
 
+// ─── default focus block (mirrors plugin/src/api.js buildDefaultFocus)
+//
+// The textarea in 学习偏好 → 自定义 Prompt previews this string when the
+// user hasn't customized anything yet. Editing target language, points
+// or card mode regenerates it. Saving customPrompt back to settings only
+// stores a non-empty value when the textarea has actually drifted from
+// the current default — that way removing checkboxes / changing target
+// language keeps reflecting in the prompt instead of getting silently
+// pinned to a stale snapshot.
+
+const KNOWLEDGE_POINT_SNIPPETS: Record<KnowledgePoint, string> = {
+  vocabulary:
+    "Vocabulary: highlight important words, phrases, and collocations; explain meaning and usage.",
+  grammar:
+    "Grammar: explain sentence structures, verb conjugations, tense, and grammatical patterns.",
+  culture:
+    "Cultural context: explain idioms, cultural references, allusions, and background.",
+  pronunciation:
+    "Pronunciation: note phonetic features, stress, liaison, pitch accent, or common pitfalls.",
+  tone: "Tone & feeling: describe emotional nuance, register, and rhetorical effect.",
+};
+
+function buildDefaultFocus(
+  targetLanguage: string,
+  points: KnowledgePoint[],
+  isSelected: boolean,
+): string {
+  const validPoints = points.filter((p) => KNOWLEDGE_POINT_SNIPPETS[p]);
+  const focusLines = validPoints.map(
+    (k) => `- type "${k}" — ${KNOWLEDGE_POINT_SNIPPETS[k]}`,
+  );
+  const allowedTypes =
+    validPoints.length > 0
+      ? validPoints.join(", ")
+      : "vocabulary, grammar, culture, pronunciation, tone";
+  const focusBlock =
+    focusLines.length > 0
+      ? `Focus areas (produce AT MOST one point per area, skip the area entirely if there is nothing valuable to say about it for that line):\n${focusLines.join(
+          "\n",
+        )}`
+      : "";
+  if (isSelected) {
+    return `Content rules:
+- translation: short ${targetLanguage} translation, one sentence.
+- points: array of {"type", "text"} objects. Only use these types: ${allowedTypes}.
+- text: ≤24 ${targetLanguage} characters. Avoid filler.
+- note: cultural or usage note, ≤60 ${targetLanguage} characters. Can be empty string.
+- If referenceTranslation or romanLyric is provided, use it only as reference.
+${focusBlock}`;
+  }
+  return `Content rules:
+- translation must be natural ${targetLanguage}.
+- points: array of {"type", "text"} objects. Only use these types: ${allowedTypes}.
+- text: ≤50 ${targetLanguage} characters per point. Avoid filler.
+- note: ≤100 ${targetLanguage} characters. Use for general feeling/meaning that doesn't fit a specific type.
+- If referenceTranslation or romanLyric is provided, use it only as reference.
+${focusBlock}`;
+}
+
 // ─── theme / font-size / opacity ─────────────────────────────
 
 function applyTheme(theme: Theme) {
@@ -232,10 +286,13 @@ function applyFontSize(size: FontSize) {
 }
 
 function applyOpacity(pct: number) {
-  // CSS-only fade for now. True window transparency would need
-  // transparent:true in tauri.conf.json + alpha on bg-base. MVP just
-  // dims the whole UI so the setting feels live.
-  document.body.style.opacity = String(clamp(pct, 40, 100) / 100);
+  // Real window transparency: tauri.conf.json has `transparent: true`,
+  // so the webview itself is see-through. We control how much the
+  // desktop bleeds through by setting --window-alpha on :root, which
+  // is consumed by .app and .settings-overlay's rgb(.../alpha)
+  // background. Surfaces like the now-playing bar stay opaque.
+  const a = clamp(pct, 40, 100) / 100;
+  document.documentElement.style.setProperty("--window-alpha", String(a));
 }
 
 // ─── DOM helpers ─────────────────────────────────────────────
@@ -304,6 +361,12 @@ const state = {
   lyricsMessage: "",
   settings: loadSettings(),
   dirty: false,
+  // Most recent default focus block written into the prompt textarea.
+  // If the textarea still matches this string when target language or
+  // points change, we transparently regenerate so the preview tracks
+  // the rule changes. Once the user types anything new the textarea
+  // diverges and we leave it alone.
+  lastDefaultPrompt: "",
 };
 
 // ─── lyric flow ──────────────────────────────────────────────
@@ -519,13 +582,61 @@ function setSegActive(group: string, value: string) {
 }
 
 function setChipsActive(points: KnowledgePoint[]) {
-  document.querySelectorAll<HTMLLabelElement>("#cfg-points .chip").forEach((chip) => {
-    const p = chip.dataset.point as KnowledgePoint | undefined;
-    const on = !!p && points.includes(p);
-    chip.classList.toggle("is-on", on);
-    const input = chip.querySelector<HTMLInputElement>("input");
-    if (input) input.checked = on;
-  });
+  // .kp-option visual state is driven entirely by `input:checked` in
+  // CSS, so we just sync the checked attribute and the browser handles
+  // the box-and-tick rendering.
+  document
+    .querySelectorAll<HTMLLabelElement>("#cfg-points .kp-option")
+    .forEach((opt) => {
+      const p = opt.dataset.point as KnowledgePoint | undefined;
+      const on = !!p && points.includes(p);
+      const input = opt.querySelector<HTMLInputElement>("input");
+      if (input) input.checked = on;
+    });
+}
+
+function readKnowledgePointsFromForm(): KnowledgePoint[] {
+  const points: KnowledgePoint[] = [];
+  document
+    .querySelectorAll<HTMLLabelElement>("#cfg-points .kp-option")
+    .forEach((opt) => {
+      const input = opt.querySelector<HTMLInputElement>("input");
+      const point = opt.dataset.point as KnowledgePoint | undefined;
+      if (input?.checked && point && VALID_POINTS.includes(point)) {
+        points.push(point);
+      }
+    });
+  return points;
+}
+
+function currentCardModeFromForm(): CardMode {
+  return el.fCardMode().value === "selected" ? "selected" : "per-line";
+}
+
+// Regenerate the default focus block from the *form's current state*,
+// not from saved settings, so the preview reflects unsaved edits.
+function syncDefaultPrompt() {
+  const target = el.fTarget().value.trim() || DEFAULT_SETTINGS.targetLanguage;
+  const points = readKnowledgePointsFromForm();
+  const isSelected = currentCardModeFromForm() === "selected";
+  const next = buildDefaultFocus(target, points, isSelected);
+  const ta = el.fPrompt();
+  // Only auto-update if the user hasn't diverged from the previous
+  // default. If they typed anything custom, leave it alone.
+  if (ta.value === state.lastDefaultPrompt || ta.value === "") {
+    ta.value = next;
+  }
+  state.lastDefaultPrompt = next;
+}
+
+function resetPromptToDefault() {
+  const target = el.fTarget().value.trim() || DEFAULT_SETTINGS.targetLanguage;
+  const points = readKnowledgePointsFromForm();
+  const isSelected = currentCardModeFromForm() === "selected";
+  const next = buildDefaultFocus(target, points, isSelected);
+  el.fPrompt().value = next;
+  state.lastDefaultPrompt = next;
+  setDirty(true);
 }
 
 function setToggle(label: HTMLLabelElement, on: boolean) {
@@ -549,12 +660,12 @@ function populateForm() {
   el.fKey().value = s.apiKey;
   el.fModel().value = s.modelName;
   el.fTarget().value = s.targetLanguage;
-  el.fPrompt().value = s.customPrompt;
   setChipsActive(s.knowledgePoints);
   el.testStatus().textContent = "未测试";
   el.testStatus().className = "test-status pending";
 
-  // 高级
+  // 高级 — populate before prompt so syncDefaultPrompt sees the right
+  // card-generation mode.
   el.fCardMode().value = s.cardGenerationMode;
   el.fTimeout().value = String(s.analyzeTimeoutSecs);
   el.fMaxLines().value = String(s.maxAnalysisLines);
@@ -567,20 +678,26 @@ function populateForm() {
   el.fFbLines().value = String(s.fallbackMaxLines);
   el.fFbTokens().value = String(s.fallbackMaxTokens);
 
+  // Custom prompt: blank settings.customPrompt means "use the default
+  // focus block", so we show the generated default in the textarea.
+  // The plugin works the same way — what the user sees in the editor
+  // is what the model will actually receive, regardless of whether
+  // it's the auto-generated default or a hand-edited override.
+  const defaultFocus = buildDefaultFocus(
+    s.targetLanguage,
+    s.knowledgePoints,
+    s.cardGenerationMode === "selected",
+  );
+  el.fPrompt().value = s.customPrompt.trim() || defaultFocus;
+  state.lastDefaultPrompt = defaultFocus;
+
   // 关于
   el.aboutVersion().textContent = `v${APP_VERSION}`;
   el.updSub().textContent = `v${APP_VERSION} · 未启用更新检查`;
 }
 
 function readForm(): Settings {
-  const points: KnowledgePoint[] = [];
-  document.querySelectorAll<HTMLLabelElement>("#cfg-points .chip").forEach((chip) => {
-    const input = chip.querySelector<HTMLInputElement>("input");
-    const point = chip.dataset.point as KnowledgePoint | undefined;
-    if (input?.checked && point && VALID_POINTS.includes(point)) {
-      points.push(point);
-    }
-  });
+  const points = readKnowledgePointsFromForm();
 
   const themeSeg = document.querySelector<HTMLButtonElement>(
     '[data-seg="theme"] .seg.is-active',
@@ -594,6 +711,23 @@ function readForm(): Settings {
 
   const autoOn = el.tglAuto().classList.contains("is-on");
   const fbOn = el.tglFb().classList.contains("is-on");
+  const cardMode = currentCardModeFromForm();
+  const targetLanguage =
+    el.fTarget().value.trim() || DEFAULT_SETTINGS.targetLanguage;
+
+  // If the textarea still matches the live default focus, persist
+  // customPrompt as "" — that way the plugin-style "live default"
+  // behavior carries through restarts: changing target language or
+  // points later will still rewrite the preview instead of being
+  // pinned to a stale snapshot.
+  const currentDefault = buildDefaultFocus(
+    targetLanguage,
+    points,
+    cardMode === "selected",
+  );
+  const promptValue = el.fPrompt().value;
+  const customPrompt =
+    promptValue.trim() === currentDefault.trim() ? "" : promptValue;
 
   return {
     autoAnalyze: autoOn,
@@ -603,12 +737,10 @@ function readForm(): Settings {
     apiEndpoint: el.fEndpoint().value.trim(),
     apiKey: el.fKey().value.trim(),
     modelName: el.fModel().value.trim(),
-    targetLanguage:
-      el.fTarget().value.trim() || DEFAULT_SETTINGS.targetLanguage,
+    targetLanguage,
     knowledgePoints: points,
-    customPrompt: el.fPrompt().value,
-    cardGenerationMode:
-      (el.fCardMode().value as CardMode) === "selected" ? "selected" : "per-line",
+    customPrompt,
+    cardGenerationMode: cardMode,
     analyzeTimeoutSecs: clamp(Number(el.fTimeout().value) || 60, 15, 180),
     maxAnalysisLines: clamp(
       Math.round(Number(el.fMaxLines().value) || 80),
@@ -830,21 +962,41 @@ function bindSettingsForm() {
     });
   });
 
-  // Chips
-  document.querySelectorAll<HTMLLabelElement>("#cfg-points .chip").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      const input = chip.querySelector<HTMLInputElement>("input");
-      setTimeout(() => {
-        if (input) chip.classList.toggle("is-on", input.checked);
+  // Knowledge-point checkboxes — the <label> wraps the <input>, so the
+  // browser handles the .checked toggle natively. We just listen for
+  // `change` to mark dirty and refresh the default-prompt preview if
+  // the textarea still equals the previous default.
+  document
+    .querySelectorAll<HTMLInputElement>("#cfg-points input[type='checkbox']")
+    .forEach((input) => {
+      input.addEventListener("change", () => {
+        syncDefaultPrompt();
         setDirty(true);
-      }, 0);
+      });
     });
+
+  // Target language and card-generation mode also feed into the default
+  // prompt — refresh on every keystroke / change.
+  el.fTarget().addEventListener("input", () => {
+    syncDefaultPrompt();
+    setDirty(true);
+  });
+  el.fCardMode().addEventListener("change", () => {
+    syncDefaultPrompt();
+    setDirty(true);
   });
 
-  // Generic input listeners → mark dirty
+  // Restore-default button: regenerate the focus block from current
+  // form state and overwrite whatever's in the textarea.
+  $<HTMLButtonElement>("#btn-prompt-reset").addEventListener("click", () => {
+    resetPromptToDefault();
+  });
+
+  // Generic input listeners → mark dirty. (cfg-target and cfg-card-mode
+  // are handled above with extra logic; the rest just need dirty.)
   const dirtyInputs = [
-    "cfg-endpoint", "cfg-key", "cfg-model", "cfg-target", "cfg-prompt",
-    "cfg-card-mode", "cfg-timeout", "cfg-max-lines", "cfg-max-tokens",
+    "cfg-endpoint", "cfg-key", "cfg-model", "cfg-prompt",
+    "cfg-timeout", "cfg-max-lines", "cfg-max-tokens",
     "cfg-temp", "cfg-thinking", "cfg-rf",
     "cfg-fb-timeout", "cfg-fb-lines", "cfg-fb-tokens",
   ];

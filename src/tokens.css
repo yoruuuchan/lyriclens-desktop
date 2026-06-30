@@ -10,10 +10,14 @@
    ============================================================ */
 
 /* ---------- Font faces -------------------------------------- */
-/* Geist + Geist Mono come from Google Fonts. Zen Kaku Gothic
-   New is used for occasional Japanese moments and accent
-   labels. All are licensed for embedding. */
-@import url("https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap");
+/* Geist + Geist Mono + Zen Kaku Gothic New are loaded LOCALLY by the
+   host (LyricLens Desktop bundles them via @fontsource in main.ts).
+   The original Google Fonts @import was removed because the network
+   round-trip would race with the bundled woff2 files and cause a
+   visible fallback flash on first paint. If you ever copy this file
+   into a host that does NOT bundle the fonts, add back:
+     @import url("https://fonts.googleapis.com/...");
+*/
 
 /* ---------- Family stacks ----------------------------------- */
 :root {

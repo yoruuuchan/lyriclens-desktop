@@ -52,8 +52,8 @@
               <div class="brand-sub">桌面端设置</div>
             </div>
           </div>
-          <button class="icon" id="btn-settings-close" type="button" title="关闭" aria-label="关闭">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          <button class="icon close-btn" id="btn-settings-close" type="button" title="关闭" aria-label="关闭">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
 
@@ -145,25 +145,53 @@
               <div class="section-title">学习偏好</div>
               <div class="field">
                 <label for="cfg-target">目标语言</label>
-                <input type="text" id="cfg-target" placeholder="中文" spellcheck="false" />
-                <div class="field-help">学习卡片的翻译和讲解会优先用这个语言。</div>
+                <input type="text" id="cfg-target" placeholder="比如：中文 / 日本語 / English" spellcheck="false" />
+                <div class="field-help">想学哪个就填哪个 — 卡片的翻译和讲解会用这个语言写。</div>
               </div>
               <div class="field">
                 <label>知识点</label>
-                <div class="chip-row" id="cfg-points">
-                  <label class="chip" data-point="vocabulary"><input type="checkbox" value="vocabulary" /> 词汇</label>
-                  <label class="chip" data-point="grammar"><input type="checkbox" value="grammar" /> 语法</label>
-                  <label class="chip" data-point="culture"><input type="checkbox" value="culture" /> 文化背景</label>
-                  <label class="chip" data-point="pronunciation"><input type="checkbox" value="pronunciation" /> 发音</label>
-                  <label class="chip" data-point="tone"><input type="checkbox" value="tone" /> 语感</label>
+                <div class="kp-grid" id="cfg-points">
+                  <label class="kp-option" data-point="vocabulary">
+                    <input type="checkbox" value="vocabulary" />
+                    <span class="kp-box" aria-hidden="true"></span>
+                    <span class="kp-text">词汇</span>
+                  </label>
+                  <label class="kp-option" data-point="grammar">
+                    <input type="checkbox" value="grammar" />
+                    <span class="kp-box" aria-hidden="true"></span>
+                    <span class="kp-text">语法</span>
+                  </label>
+                  <label class="kp-option" data-point="culture">
+                    <input type="checkbox" value="culture" />
+                    <span class="kp-box" aria-hidden="true"></span>
+                    <span class="kp-text">文化背景</span>
+                  </label>
+                  <label class="kp-option" data-point="pronunciation">
+                    <input type="checkbox" value="pronunciation" />
+                    <span class="kp-box" aria-hidden="true"></span>
+                    <span class="kp-text">发音</span>
+                  </label>
+                  <label class="kp-option" data-point="tone">
+                    <input type="checkbox" value="tone" />
+                    <span class="kp-box" aria-hidden="true"></span>
+                    <span class="kp-text">语感</span>
+                  </label>
                 </div>
-                <div class="field-help">每个勾选的方向在每行最多出一条要点。</div>
+                <div class="field-help">勾选后会自动重写下方 Prompt 中间层。</div>
               </div>
-              <div class="field">
-                <label for="cfg-prompt">自定义 Prompt <span style="color: var(--ink-4); font-weight: var(--weight-regular);">（可选）</span></label>
-                <textarea id="cfg-prompt" placeholder="留空使用默认 focus 块。" spellcheck="false"></textarea>
-                <div class="field-help">替换可编辑的 focus 中间层。JSON schema 与 "no markdown" 兜底始终保留。</div>
-              </div>
+              <details class="prompt-details" id="prompt-details">
+                <summary class="prompt-summary">
+                  <span class="prompt-summary-label">自定义 Prompt <span class="prompt-summary-tag">（高级）</span></span>
+                  <svg class="prompt-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+                </summary>
+                <div class="prompt-content">
+                  <p class="prompt-note">头部（JSON 格式要求）和尾部（输出限制）由系统自动添加，不可编辑。</p>
+                  <textarea id="cfg-prompt" class="prompt-textarea" spellcheck="false"></textarea>
+                  <div class="prompt-actions">
+                    <button id="btn-prompt-reset" type="button">恢复默认</button>
+                  </div>
+                </div>
+              </details>
             </section>
           </div>
 

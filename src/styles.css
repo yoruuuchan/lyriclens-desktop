@@ -3,7 +3,68 @@
    type scale to desktop-friendly sizes (the design system is mobile-first
    at 13px base; on a real window 15px reads better). The three font-size
    modes mirror the BetterNCM plugin's compact / standard / large knob. */
+
 @import "./tokens.css";
+
+/* Local @font-face — copied as woff2 from @fontsource into src/fonts/.
+   Going through @fontsource css's relative url() paths via Vite's
+   @import resolver was flaky in the Tauri webview, so we inline the
+   declarations here. font-display: block keeps the page waiting up to
+   3s for the real font instead of swapping in a fallback first.
+
+   Two important fixes vs the first cut:
+   1. Geist + Geist Mono are now VARIABLE fonts (one file each, weight
+      range 100–900). The BetterNCM plugin uses weights like 550 / 650
+      which discrete-weight files can't render; variable can.
+   2. Noto Sans SC supplies the *Chinese* glyphs. Geist is Latin-only,
+      so without an SC face the CJK characters silently fall through
+      to Microsoft YaHei UI and look visibly different from the plugin
+      (which already pins Noto Sans SC). Three discrete weights cover
+      the only places we use bold-ish CJK. */
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-display: block;
+  font-weight: 100 900;
+  src: url("./fonts/geist-variable.woff2") format("woff2-variations");
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-display: block;
+  font-weight: 100 900;
+  src: url("./fonts/geist-mono-variable.woff2") format("woff2-variations");
+}
+@font-face {
+  font-family: "Noto Sans SC";
+  font-style: normal;
+  font-display: block;
+  font-weight: 400;
+  src: url("./fonts/noto-sc-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Noto Sans SC";
+  font-style: normal;
+  font-display: block;
+  font-weight: 500;
+  src: url("./fonts/noto-sc-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Noto Sans SC";
+  font-style: normal;
+  font-display: block;
+  font-weight: 600;
+  src: url("./fonts/noto-sc-600.woff2") format("woff2");
+}
+
+/* Insert Noto Sans SC right after Geist in the family stack so CJK
+   characters use it. The design-system tokens.css set --font-ui with
+   Inter / Segoe UI as the SC fallback; we override that to match the
+   BetterNCM plugin's stack. */
+:root {
+  --font-ui:   "Geist", "Noto Sans SC", "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  --font-mono: "Geist Mono", "Noto Sans SC", "Cascadia Mono", Consolas, monospace;
+}
 
 :root,
 :root[data-font-size="standard"] {
@@ -41,12 +102,26 @@
 
 html, body, .app { height: 100%; margin: 0; padding: 0; }
 
+/* Window transparency: tauri.conf.json sets `transparent: true`, so the
+   webview itself is see-through. We give the *base layer* (body / .app)
+   a controllable alpha via --window-alpha. Surfaces like .now-playing,
+   .actions, and .settings-section keep their own solid backgrounds so
+   text and cards never bleed into the desktop behind them. */
+:root {
+  --window-alpha: 1;
+  --bg-base-rgb: 232 236 243;       /* akari default */
+}
+[data-theme="yoru"] {
+  --bg-base-rgb: 11 16 32;
+}
+
+html, body { background: transparent; }
+
 body {
   font-family: var(--font-ui);
   font-size: var(--text-base);
   line-height: var(--leading-normal);
   color: var(--ink-1);
-  background: var(--page-wash);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -56,6 +131,20 @@ body {
   display: grid;
   grid-template-rows: auto 1fr auto;
   position: relative;
+  /* Composited radial wash from the design system, layered over an
+     adjustable solid-alpha base. The radial gradients themselves are
+     opaque-but-soft; the var(--window-alpha) controls how much of the
+     desktop shows through behind everything. */
+  background-color: rgb(var(--bg-base-rgb) / var(--window-alpha));
+  background-image:
+    radial-gradient(120% 80% at 80% -10%, rgba(79, 108, 232, 0.07), transparent 60%),
+    radial-gradient(90% 70% at 0% 100%, rgba(240, 106, 32, 0.05), transparent 55%);
+}
+
+[data-theme="yoru"] .app {
+  background-image:
+    radial-gradient(120% 80% at 80% -10%, rgba(122, 149, 250, 0.10), transparent 60%),
+    radial-gradient(90% 70% at 0% 100%, rgba(240, 120, 48, 0.06), transparent 55%);
 }
 
 /* ═══ now playing header ═════════════════════════════════════ */
@@ -200,6 +289,29 @@ button.icon {
 button.icon svg { width: 18px; height: 18px; stroke-width: 1.75; }
 button.icon:hover { color: var(--ink-1); }
 
+/* Close button in the settings header is a primary affordance — make
+   it obvious by giving it a tinted background and a clearer hover
+   state. Uses the error color on hover so the "leaving without saving"
+   intent reads instantly. */
+button.icon.close-btn {
+  width: 36px; height: 36px;
+  background: var(--bg-sunken);
+  box-shadow: var(--shadow-inset);
+  color: var(--ink-2);
+}
+button.icon.close-btn svg {
+  width: 20px; height: 20px;
+  stroke-width: 2.25;
+}
+button.icon.close-btn:hover {
+  color: var(--error-500);
+  background: var(--error-100);
+  box-shadow: none;
+}
+button.icon.close-btn:active {
+  transform: scale(0.93);
+}
+
 .hint {
   margin-left: auto;
   font-family: var(--font-mono);
@@ -212,10 +324,18 @@ button.icon:hover { color: var(--ink-1); }
 
 .settings-overlay {
   position: absolute; inset: 0;
-  background: var(--page-wash);
+  background-color: rgb(var(--bg-base-rgb) / var(--window-alpha));
+  background-image:
+    radial-gradient(120% 80% at 80% -10%, rgba(79, 108, 232, 0.07), transparent 60%),
+    radial-gradient(90% 70% at 0% 100%, rgba(240, 106, 32, 0.05), transparent 55%);
   display: none;
   flex-direction: column;
   z-index: 10;
+}
+[data-theme="yoru"] .settings-overlay {
+  background-image:
+    radial-gradient(120% 80% at 80% -10%, rgba(122, 149, 250, 0.10), transparent 60%),
+    radial-gradient(90% 70% at 0% 100%, rgba(240, 120, 48, 0.06), transparent 55%);
 }
 .settings-overlay.open {
   display: flex;
@@ -526,33 +646,174 @@ button.icon:hover { color: var(--ink-1); }
   text-align: right;
 }
 
-/* ─── chip row ─────────────────────────────────────────────── */
+/* ─── knowledge-point checkbox grid ────────────────────────── */
 
-.chip-row {
-  display: flex; flex-wrap: wrap; gap: var(--space-2);
+.kp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
   padding: var(--space-2) 0;
 }
-.chip {
-  display: inline-flex; align-items: center; gap: var(--space-1);
-  padding: 7px var(--space-3);
-  border-radius: var(--radius-pill);
+
+.kp-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
   background: var(--bg-sunken);
   box-shadow: var(--shadow-inset);
   font-size: var(--text-sm);
-  color: var(--ink-3);
+  color: var(--ink-2);
   cursor: pointer;
   user-select: none;
   transition: color var(--dur-fast) var(--ease-out),
               background var(--dur-fast) var(--ease-out),
               box-shadow var(--dur-fast) var(--ease-out);
 }
-.chip.is-on {
-  background: var(--primary-50);
-  color: var(--primary-700);
-  box-shadow: inset 0 0 0 1.5px var(--primary-500);
+
+.kp-option:hover { color: var(--ink-1); }
+
+.kp-option input {
+  position: absolute;
+  opacity: 0;
+  width: 0; height: 0;
+  pointer-events: none;
 }
-[data-theme="yoru"] .chip.is-on { color: var(--primary-800); }
-.chip input { position: absolute; opacity: 0; pointer-events: none; }
+
+.kp-box {
+  width: 18px; height: 18px;
+  border-radius: 5px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-flat), inset 0 0 0 1px var(--line-strong);
+  position: relative;
+  flex-shrink: 0;
+  transition: background var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.kp-option input:checked ~ .kp-box {
+  background: var(--primary-500);
+  box-shadow: 0 2px 6px rgba(79, 108, 232, 0.30), inset 0 0 0 1px var(--primary-600);
+}
+
+[data-theme="yoru"] .kp-option input:checked ~ .kp-box {
+  box-shadow: 0 2px 6px rgba(122, 149, 250, 0.30), inset 0 0 0 1px var(--primary-400);
+}
+
+/* checkmark drawn with two borders on a rotated empty box */
+.kp-option input:checked ~ .kp-box::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 1px;
+  width: 5px;
+  height: 10px;
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.kp-option input:checked ~ .kp-text {
+  color: var(--primary-700);
+  font-weight: var(--weight-medium);
+}
+
+[data-theme="yoru"] .kp-option input:checked ~ .kp-text {
+  color: var(--primary-700);
+}
+
+.kp-option input:focus-visible ~ .kp-box {
+  box-shadow: var(--shadow-flat), inset 0 0 0 1px var(--line-strong), var(--shadow-focus);
+}
+
+/* ─── collapsible custom-prompt block ──────────────────────── */
+
+.prompt-details {
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--line-1);
+}
+
+.prompt-summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--ink-2);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.prompt-summary::-webkit-details-marker { display: none; }
+.prompt-summary:hover { color: var(--ink-1); }
+
+.prompt-summary-tag {
+  color: var(--ink-4);
+  font-weight: var(--weight-regular);
+}
+
+.prompt-chevron {
+  width: 16px; height: 16px;
+  flex-shrink: 0;
+  color: var(--ink-3);
+  transition: transform var(--dur-base) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.prompt-details[open] .prompt-chevron {
+  transform: rotate(180deg);
+  color: var(--primary-500);
+}
+
+.prompt-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  animation: prompt-slide-down var(--dur-base) var(--ease-out);
+}
+
+@keyframes prompt-slide-down {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.prompt-note {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  line-height: var(--leading-snug);
+}
+
+.prompt-textarea {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--ink-1);
+  background: var(--bg-sunken);
+  border: none;
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  box-shadow: var(--shadow-inset);
+  min-height: 240px;
+  resize: vertical;
+  line-height: var(--leading-normal);
+  width: 100%;
+  box-sizing: border-box;
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+.prompt-textarea:focus {
+  outline: none;
+  box-shadow: var(--shadow-inset), var(--shadow-focus);
+}
+
+.prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
 
 /* ─── test-connection row ──────────────────────────────────── */
 
