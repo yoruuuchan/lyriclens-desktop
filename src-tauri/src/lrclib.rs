@@ -5,10 +5,23 @@
 // duration. LRCLIB matches with a tolerance of ±2s on duration and a
 // normalized comparison on artist/track names. If /api/get misses, fall
 // back to /api/search and pick the best candidate.
+//
+// We route through `lrclib.yoru-and-akari.dev`, a Cloudflare Worker
+// reverse-proxy whose source lives in this repo at
+// `cloudflare-worker/`. The proxy exists because direct TLS to
+// lrclib.net regularly gets reset by the GFW on mainland China
+// networks — Cloudflare's HK/SG edge terminates the user's TLS and
+// then the server-to-server hop to lrclib.net runs from CF's backbone
+// instead of the consumer path. The proxy also caches 200 responses
+// at the edge so repeated lookups of the same song never re-hit
+// upstream.
+//
+// If the proxy ever has to be bypassed, swap this back to the direct
+// URL — the surface (path + query + JSON shape) is identical.
 
 use serde::{Deserialize, Serialize};
 
-const BASE_URL: &str = "https://lrclib.net/api";
+const BASE_URL: &str = "https://lrclib.yoru-and-akari.dev/api";
 const USER_AGENT: &str = concat!(
     "LyricLens-Desktop/",
     env!("CARGO_PKG_VERSION"),
