@@ -105,3 +105,11 @@ export function clearAnalysisCache(): void {
     // Same swallow as writeRaw — clear is best-effort.
   }
 }
+
+// Used by the settings panel to show how many entries are cached
+// without exposing the raw shape. Reads are cheap because localStorage
+// is in-memory at the page level.
+export function countAnalysisCacheEntries(): number {
+  const cache = readRaw();
+  return Object.keys(cache.entries).length;
+}
