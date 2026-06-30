@@ -6,7 +6,7 @@ A standalone desktop companion that surfaces lyrics with LLM-powered learning no
 
 ## Status
 
-**Alpha · MVP loop wired, pending real-provider validation.** SMTC pulls now-playing from any Windows player that exposes it (Spotify / QQ Music / foobar2000 / Edge media / …), LRCLIB resolves the synced lyrics, the sync-scrolling lyric pane works, the 4-tab settings panel matches the BetterNCM plugin one-to-one, and OpenAI-compatible LLM cards now render inline under the active lyric line.
+**Alpha · MVP loop wired + iterating on real-device feedback.** SMTC pulls now-playing from any Windows player that exposes it (Spotify / QQ Music / foobar2000 / Edge media / …), LRCLIB resolves the synced lyrics, the sync-scrolling lyric pane works, the 4-tab settings panel matches the BetterNCM plugin one-to-one, and OpenAI-compatible LLM cards now render inline under the active lyric line. Session 2 landed mainland-China connectivity (self-hosted CF Worker proxy for LRCLIB), LRCLIB candidate-ranking fix, and a local analysis-result cache.
 
 ## Architecture
 
@@ -15,7 +15,7 @@ This is **host 2** of the LyricLens dual-host product:
 ```
 ┌─ Plugin (BetterNCM) ──────────┐   ┌─ Desktop (this repo) ────────┐
 │ injected into NetEase Cloud   │   │ standalone Tauri app          │
-│ lyrics: NCM memory             │   │ lyrics: LRCLIB                │
+│ lyrics: NCM memory             │   │ lyrics: LRCLIB (CF Worker)    │
 │ storage: IndexedDB             │   │ storage: SQLite (deferred)    │
 │ ui: NCM overlay                │   │ ui: independent window        │
 └────────────────────────────────┘   └───────────────────────────────┘
@@ -29,9 +29,11 @@ The two hosts are independent complete products. If BetterNCM dies, the desktop 
 - **SMTC reader** — Title / artist / album / duration / position / playback status / `LastUpdatedTime` / `PlaybackRate` / `SourceAppUserModelId`, pulled via `windows-rs` `Media_Control`. Polled every 1s; the frontend extrapolates position between polls for smooth lyric highlight.
 - **Timeline health classification** — Each SMTC session runs through a 6-tier state machine: `timeline_healthy` / `timeline_candidate` → per-line sync; `timeline_unstable` → per-line with warning; `metadata_only` / `timeline_dead` → fan all cards out automatically. The decision is driven by whether position actually advances at the expected rate over a ≥3-frame window, not by an allowlist of player names.
 - **Debug panel** — Settings → 调试 tab shows the current session plus every sibling SMTC session with raw fields (position / duration / lastUpdated / capturedAt / playbackRate) and a colored health badge. One screenshot when something goes wrong is enough to triage.
-- **LRCLIB client** — `/api/get` with `/api/search` fallback, ±5s duration tolerance, LRC parser handles multi-stamp lines. (Probe E measured 97.9% hit rate across 290 songs in 8 categories — see the plugin repo's roadmap for the benchmark.)
-- **Sync-scrolling lyric pane** — Active line highlighted in primary blue, faded past/future lines, smooth scroll-into-view.
+- **LRCLIB client + Cloudflare Worker proxy** — `/api/get` with `/api/search` fallback, ±5s duration tolerance, LRC parser handles multi-stamp lines (Probe E measured 97.9% hit rate across 290 songs in 8 categories — see the plugin repo's roadmap for the benchmark). **All requests route through a self-hosted Cloudflare Worker at `https://lrclib.yoru-and-akari.dev/api`** — HK/SG edge nodes are far more reachable from mainland China than lrclib.net directly, with 6h edge caching for 200s and no-store for 404/5xx. Rust client retries once on transient failures and surfaces typed friendly errors (timeout / connect / 5xx / 4xx each map to a plain-language hint).
+- **Candidate ranking prefers synced** — LRCLIB `/api/search` can return 10+ candidates of mixed quality. Artists like `Aimer / EGOIST` (ninelie) miss `/api/get` and must use search, where plain-only candidates (no timestamps, last line literally `(End)`) often outrank synced ones by duration. The Rust client sorts in two passes: **first by whether `syncedLyrics` is non-empty, then by duration distance** — so the plain-only `(End)` ghost can't win anymore.
+- **Sync-scrolling lyric pane (auto fan-out for plain-only)** — Active line highlighted in primary blue, faded past/future lines, smooth scroll-into-view. When the LRC has no timeline at all (every line `timeMs=0`), the pane auto-switches to "expand all cards" mode instead of letting the active-index walker pin to the last line.
 - **LLM analysis pipeline** — Reuses the plugin prompt frame / typed-points schema, calls an OpenAI-compatible Chat Completions endpoint, parses JSON, and renders the learning card below the active lyric line.
+- **Local analysis-result cache** — localStorage FIFO (50-entry cap), keyed by `${trackKey}|${analysisSignature}`. Replaying the same track with the same settings hits the cache instantly and the card flips its top-right badge to `cached` (primary tint — no need to open DevTools to confirm). Both primary-path and fallback successes write to the cache, so once you've gotten a song to render you never pay the "primary fails → fallback" cost twice. Schema changes are invalidated via a `CACHE_VERSION` bump.
 - **yoru-and-akari Console Design System** — Neumorphism surfaces, akari (light) / yoru (dark) themes, Geist + Noto Sans SC as bundled woff2 files (no Google Fonts round-trip, no fallback flash).
 - **Real window transparency** — Toggleable 40–100 % alpha. The desktop bleeds through behind the lyric pane while surfaces (now-playing strip, settings cards, footer) stay solid so text never blurs.
 - **Settings — 4 tabs matching the plugin** —
@@ -67,14 +69,20 @@ In-app debugging: press **F12** or **Ctrl + Shift + I** for the webview devtools
 ```
 src/                  vanilla TS frontend
   main.ts             SMTC poll loop, settings overlay, lyric render
+  analysis.ts         LLM analysis pipeline + cache entry points
+  analysis-cache.ts   localStorage FIFO cache (CACHE_VERSION-gated)
   styles.css          design-system surfaces + window-alpha + components
   tokens.css          design-system tokens (verbatim from yoru-and-akari)
   fonts/              Geist (variable) + Geist Mono (variable) + Noto Sans SC
 src-tauri/
   src/lib.rs          Tauri commands wrapping the modules below
   src/smtc.rs         Windows SMTC reader
-  src/lrclib.rs       LRCLIB client + LRC parser
+  src/lrclib.rs       LRCLIB client + LRC parser (retry + candidate ranking)
   tauri.conf.json     window: 480×720, transparent: true, decorations: true
+cloudflare-worker/    LRCLIB reverse-proxy Worker + deploy script
+  worker.js           /api/get, /api/search passthrough + /healthz + edge cache
+  wrangler.toml       route declaration
+  deploy.sh           one-shot multipart API upload, runs inside WSL
 docs/roadmap/         README, progress log (HANDOFF-*.md is gitignored)
 ```
 
