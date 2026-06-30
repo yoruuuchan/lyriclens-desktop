@@ -15,15 +15,26 @@ const USER_AGENT: &str = concat!(
     " (+https://github.com/yoruuuchan/LyricLens)",
 );
 
+// LRCLIB returns camelCase JSON (trackName, syncedLyrics, …). Tauri
+// also serializes Rust struct fields to camelCase when crossing into
+// JS by default. rename_all = "camelCase" makes BOTH directions line
+// up so the Deserialize from LRCLIB and the Serialize to the frontend
+// share one field convention.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LyricResult {
     pub id: i64,
     pub track_name: String,
     pub artist_name: String,
+    #[serde(default)]
     pub album_name: Option<String>,
+    #[serde(default)]
     pub duration: Option<f64>,
+    #[serde(default)]
     pub instrumental: bool,
+    #[serde(default)]
     pub plain_lyrics: Option<String>,
+    #[serde(default)]
     pub synced_lyrics: Option<String>,
 }
 
@@ -75,21 +86,20 @@ pub async fn get(
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SearchCandidate {
     id: i64,
-    #[serde(rename = "trackName")]
     track_name: String,
-    #[serde(rename = "artistName")]
     artist_name: String,
-    #[serde(rename = "albumName", default)]
+    #[serde(default)]
     album_name: Option<String>,
     #[serde(default)]
     duration: Option<f64>,
     #[serde(default)]
     instrumental: bool,
-    #[serde(rename = "plainLyrics", default)]
+    #[serde(default)]
     plain_lyrics: Option<String>,
-    #[serde(rename = "syncedLyrics", default)]
+    #[serde(default)]
     synced_lyrics: Option<String>,
 }
 

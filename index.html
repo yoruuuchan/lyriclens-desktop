@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="yoru">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="stylesheet" href="/src/styles.css" />
@@ -11,7 +11,17 @@
   <body>
     <main class="app">
       <header class="now-playing">
-        <div class="title" id="np-title">—</div>
+        <div class="title-row">
+          <div class="title" id="np-title">—</div>
+          <div class="icon-buttons">
+            <button class="icon" id="btn-theme" type="button" title="切换主题" aria-label="切换主题">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" id="theme-icon"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+            </button>
+            <button class="icon" id="btn-settings" type="button" title="设置" aria-label="设置">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+        </div>
         <div class="meta">
           <span id="np-artist">—</span>
           <span class="dot" aria-hidden="true">·</span>
@@ -24,13 +34,285 @@
       </header>
 
       <section class="lyrics" id="lyrics" aria-live="polite">
-        <p class="placeholder">play something — smtc will pick it up.</p>
+        <p class="placeholder">播放任意歌曲，SMTC 会自动识别。</p>
       </section>
 
       <footer class="actions">
-        <button id="btn-refresh" type="button">refresh</button>
-        <span class="hint" id="hint">polling 1s</span>
+        <button id="btn-refresh" type="button">重新拉取</button>
+        <span class="hint" id="hint">每秒轮询</span>
       </footer>
+
+      <!-- ═══ settings overlay ═══════════════════════════════════ -->
+      <section class="settings-overlay" id="settings-overlay" aria-hidden="true">
+        <div class="settings-header">
+          <div class="brand">
+            <div class="brand-mark" aria-hidden="true">L</div>
+            <div class="brand-text">
+              <div class="brand-name">LyricLens</div>
+              <div class="brand-sub">桌面端设置</div>
+            </div>
+          </div>
+          <button class="icon" id="btn-settings-close" type="button" title="关闭" aria-label="关闭">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        <div class="settings-tabs" role="tablist">
+          <button class="settings-tab is-active" data-tab="general" role="tab" type="button">常规</button>
+          <button class="settings-tab" data-tab="ai" role="tab" type="button">AI 服务</button>
+          <button class="settings-tab" data-tab="advanced" role="tab" type="button">高级</button>
+          <button class="settings-tab" data-tab="about" role="tab" type="button">关于</button>
+        </div>
+
+        <div class="settings-body">
+          <!-- ─── 常规 ─────────────────────────────────────────── -->
+          <div class="tab-panel is-active" data-tab="general">
+            <section class="settings-section">
+              <div class="section-title">播放与分析</div>
+              <div class="setting-row">
+                <div class="setting-copy">
+                  <strong>自动分析新歌曲</strong>
+                  <span>SMTC 切歌后自动查询 LRCLIB 并生成卡片。</span>
+                </div>
+                <label class="toggle" id="tgl-auto-analyze">
+                  <input type="checkbox" />
+                  <span class="knob"></span>
+                </label>
+              </div>
+            </section>
+
+            <section class="settings-section">
+              <div class="section-title">外观</div>
+              <div class="setting-row">
+                <div class="setting-copy">
+                  <strong>主题</strong>
+                  <span>深色与浅色采用独立配色，建议跟随听歌时间。</span>
+                </div>
+                <div class="segmented" data-seg="theme">
+                  <button class="seg" data-value="yoru" type="button">深色</button>
+                  <button class="seg" data-value="akari" type="button">浅色</button>
+                </div>
+              </div>
+              <div class="setting-row">
+                <div class="setting-copy">
+                  <strong>字体大小</strong>
+                  <span>只调整文字，不改变窗口尺寸。</span>
+                </div>
+                <div class="segmented" data-seg="fontSize">
+                  <button class="seg" data-value="compact" type="button">紧凑</button>
+                  <button class="seg" data-value="standard" type="button">标准</button>
+                  <button class="seg" data-value="large" type="button">较大</button>
+                </div>
+              </div>
+              <div class="setting-row stack">
+                <div class="setting-copy">
+                  <strong>窗口透明度</strong>
+                  <span>越低越透，桌面图案会从背后透出。</span>
+                </div>
+                <div class="slider-row">
+                  <input type="range" class="slider" id="sld-opacity" min="40" max="100" step="1" value="100" />
+                  <span class="slider-val" id="sld-opacity-val">100%</span>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <!-- ─── AI 服务 ──────────────────────────────────────── -->
+          <div class="tab-panel" data-tab="ai">
+            <section class="settings-section">
+              <div class="section-title">OpenAI 兼容服务</div>
+              <div class="field">
+                <label for="cfg-endpoint">API Endpoint</label>
+                <input type="url" id="cfg-endpoint" placeholder="https://api.deepseek.com/v1" autocomplete="off" />
+                <div class="field-help">填到 /v1 即可，会自动补全为 /v1/chat/completions。</div>
+              </div>
+              <div class="field">
+                <label for="cfg-key">API Key</label>
+                <input type="password" id="cfg-key" placeholder="sk-…" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="field">
+                <label for="cfg-model">模型</label>
+                <input type="text" id="cfg-model" placeholder="deepseek-chat" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="test-row">
+                <span class="test-status pending" id="test-status">未测试</span>
+                <button id="btn-test-conn" type="button">测试连接</button>
+              </div>
+              <div class="field-help" style="margin-top: var(--space-2);">API Key 仅保存在本地配置，不上传到任何服务器。</div>
+            </section>
+
+            <section class="settings-section">
+              <div class="section-title">学习偏好</div>
+              <div class="field">
+                <label for="cfg-target">目标语言</label>
+                <input type="text" id="cfg-target" placeholder="中文" spellcheck="false" />
+                <div class="field-help">学习卡片的翻译和讲解会优先用这个语言。</div>
+              </div>
+              <div class="field">
+                <label>知识点</label>
+                <div class="chip-row" id="cfg-points">
+                  <label class="chip" data-point="vocabulary"><input type="checkbox" value="vocabulary" /> 词汇</label>
+                  <label class="chip" data-point="grammar"><input type="checkbox" value="grammar" /> 语法</label>
+                  <label class="chip" data-point="culture"><input type="checkbox" value="culture" /> 文化背景</label>
+                  <label class="chip" data-point="pronunciation"><input type="checkbox" value="pronunciation" /> 发音</label>
+                  <label class="chip" data-point="tone"><input type="checkbox" value="tone" /> 语感</label>
+                </div>
+                <div class="field-help">每个勾选的方向在每行最多出一条要点。</div>
+              </div>
+              <div class="field">
+                <label for="cfg-prompt">自定义 Prompt <span style="color: var(--ink-4); font-weight: var(--weight-regular);">（可选）</span></label>
+                <textarea id="cfg-prompt" placeholder="留空使用默认 focus 块。" spellcheck="false"></textarea>
+                <div class="field-help">替换可编辑的 focus 中间层。JSON schema 与 "no markdown" 兜底始终保留。</div>
+              </div>
+            </section>
+          </div>
+
+          <!-- ─── 高级 ─────────────────────────────────────────── -->
+          <div class="tab-panel" data-tab="advanced">
+            <section class="settings-section">
+              <div class="section-title">分析请求</div>
+              <div class="field">
+                <label for="cfg-card-mode">卡片生成模式</label>
+                <select id="cfg-card-mode">
+                  <option value="per-line">逐句</option>
+                  <option value="selected">精选</option>
+                </select>
+                <div class="field-help">逐句：每行一张卡片；精选：让模型挑 6–8 句最值得学的。</div>
+              </div>
+              <div class="field-grid">
+                <div class="field">
+                  <label for="cfg-timeout">超时（秒）</label>
+                  <input type="number" id="cfg-timeout" min="15" max="180" step="1" />
+                </div>
+                <div class="field">
+                  <label for="cfg-max-lines">最大歌词行数</label>
+                  <input type="number" id="cfg-max-lines" min="5" max="80" step="1" />
+                </div>
+              </div>
+              <div class="field-grid">
+                <div class="field">
+                  <label for="cfg-max-tokens">最大 Tokens</label>
+                  <input type="number" id="cfg-max-tokens" min="256" max="16000" step="64" />
+                </div>
+                <div class="field">
+                  <label for="cfg-temp">Temperature</label>
+                  <input type="number" id="cfg-temp" min="0" max="1" step="0.05" />
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-section">
+              <div class="section-title">模型兼容</div>
+              <div class="field">
+                <label for="cfg-thinking">Thinking</label>
+                <select id="cfg-thinking">
+                  <option value="off">关闭</option>
+                  <option value="auto">自动</option>
+                  <option value="high">高</option>
+                  <option value="max">最大</option>
+                </select>
+                <div class="field-help">仅对 DeepSeek V4 等支持思考链的模型生效。</div>
+              </div>
+              <div class="field">
+                <label for="cfg-rf">Response Format</label>
+                <select id="cfg-rf">
+                  <option value="auto">自动</option>
+                  <option value="json_object">强制 json_object</option>
+                  <option value="off">不发送</option>
+                </select>
+                <div class="field-help">部分服务不支持 json_object，会自动回退。</div>
+              </div>
+              <div class="setting-row">
+                <div class="setting-copy">
+                  <strong>超时后自动重试</strong>
+                  <span>用更小的批次和更短超时再试一次。</span>
+                </div>
+                <label class="toggle" id="tgl-fallback">
+                  <input type="checkbox" />
+                  <span class="knob"></span>
+                </label>
+              </div>
+              <div class="field-grid">
+                <div class="field">
+                  <label for="cfg-fb-timeout">重试超时（秒）</label>
+                  <input type="number" id="cfg-fb-timeout" min="15" max="180" step="1" />
+                </div>
+                <div class="field">
+                  <label for="cfg-fb-lines">重试行数</label>
+                  <input type="number" id="cfg-fb-lines" min="5" max="80" step="1" />
+                </div>
+              </div>
+              <div class="field">
+                <label for="cfg-fb-tokens">重试 Tokens</label>
+                <input type="number" id="cfg-fb-tokens" min="256" max="16000" step="64" />
+              </div>
+            </section>
+          </div>
+
+          <!-- ─── 关于 ─────────────────────────────────────────── -->
+          <div class="tab-panel" data-tab="about">
+            <section class="settings-section">
+              <div class="section-title">关于</div>
+              <div class="kv-row">
+                <span class="kv-key">当前版本</span>
+                <span class="kv-val mono" id="about-version">v0.1.0</span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-key">来源</span>
+                <span class="kv-val mono">lyriclens · desktop · tauri</span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-key">GitHub</span>
+                <a class="kv-val link" href="https://github.com/yoruuuchan/lyriclens-desktop" data-external>yoruuuchan/lyriclens-desktop</a>
+              </div>
+              <div class="kv-row">
+                <span class="kv-key">姐妹仓库</span>
+                <a class="kv-val link" href="https://github.com/yoruuuchan/LyricLens" data-external>yoruuuchan/LyricLens</a>
+              </div>
+            </section>
+
+            <section class="settings-section">
+              <div class="section-title">开发者意见反馈</div>
+              <p class="about-copy" style="margin-bottom: var(--space-2);">遇到问题或有建议，可以直接写给开发者。邮件由 LyricLens 服务端转发，不会在应用里暴露收件地址。</p>
+              <div class="field">
+                <label for="fb-email">你的邮箱（用于回复）</label>
+                <input type="email" id="fb-email" placeholder="you@example.com" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="field">
+                <label for="fb-body">反馈内容</label>
+                <textarea id="fb-body" maxlength="10000" placeholder="可以贴日志、截图链接或描述操作步骤。" spellcheck="false"></textarea>
+                <div class="field-meta">
+                  <span id="fb-status" class="test-status">尚未发送</span>
+                  <span><span id="fb-count">0</span> / 10000</span>
+                </div>
+              </div>
+              <div style="display: flex; justify-content: flex-end; padding-top: var(--space-2);">
+                <button id="btn-fb-send" type="button">发送反馈</button>
+              </div>
+            </section>
+
+            <section class="settings-section">
+              <div class="section-title">更新</div>
+              <div class="update-card">
+                <div>
+                  <div class="upd-state">已是最新版本</div>
+                  <span class="upd-sub" id="upd-sub">v0.1.0 · 未启用更新检查</span>
+                </div>
+                <button id="btn-upd-check" type="button" disabled>重新检查</button>
+              </div>
+              <p class="about-copy">桌面端的自动更新通道尚未上线。每次发版可在 GitHub Releases 手动下载。</p>
+            </section>
+          </div>
+        </div>
+
+        <div class="settings-footer">
+          <span class="footer-status" id="footer-status">已应用</span>
+          <button id="btn-settings-cancel" type="button">取消</button>
+          <button id="btn-settings-save" class="primary" type="button">保存设置</button>
+        </div>
+      </section>
+
+      <div class="save-toast" id="save-toast">已保存 · <span id="save-toast-time">--:--</span></div>
     </main>
   </body>
 </html>
