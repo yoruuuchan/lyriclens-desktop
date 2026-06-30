@@ -172,8 +172,14 @@ struct SearchCandidate {
     synced_lyrics: Option<String>,
 }
 
-/// Fallback search when /api/get misses. Returns the closest match by
-/// duration if one is within 5 seconds, else the first candidate.
+/// Fallback search when /api/get misses. Candidates are ranked first
+/// by whether they have synced lyrics (a plain-only candidate with the
+/// "perfect" duration is far worse for our use case than a synced one
+/// a couple seconds off), then by duration closeness to the SMTC
+/// duration when one was given. Discovered when Aimer / EGOIST · ninelie
+/// fell back to a romaji-only plain candidate whose last line was
+/// "(End)" — every lyric line ended up with timeMs=0 and the active-
+/// line tracker pinned to the final "(End)" forever.
 pub async fn search(
     track_name: &str,
     artist_name: &str,
@@ -194,18 +200,33 @@ pub async fn search(
         return Err(LrcError::NotFound);
     }
 
-    let pick = if let Some(target) = duration_secs {
-        candidates
-            .iter()
-            .min_by(|a, b| {
-                let da = a.duration.map(|d| (d - target).abs()).unwrap_or(f64::INFINITY);
-                let db = b.duration.map(|d| (d - target).abs()).unwrap_or(f64::INFINITY);
-                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .unwrap()
-    } else {
-        &candidates[0]
-    };
+    let pick = candidates
+        .iter()
+        .min_by(|a, b| {
+            // Synced-first. Treat empty strings the same as None — the
+            // LRCLIB response sometimes carries a syncedLyrics field
+            // whose value is the empty string for plain-only rows.
+            let a_synced = a.synced_lyrics.as_deref().is_some_and(|s| !s.is_empty());
+            let b_synced = b.synced_lyrics.as_deref().is_some_and(|s| !s.is_empty());
+            match (a_synced, b_synced) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => {
+                    // Same tier on synced-availability — break the tie
+                    // by duration closeness when we have a target. If
+                    // no target, fall back to the API's own order
+                    // (stable min_by returns the first equal-key one).
+                    if let Some(target) = duration_secs {
+                        let da = a.duration.map(|d| (d - target).abs()).unwrap_or(f64::INFINITY);
+                        let db = b.duration.map(|d| (d - target).abs()).unwrap_or(f64::INFINITY);
+                        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                    } else {
+                        std::cmp::Ordering::Equal
+                    }
+                }
+            }
+        })
+        .unwrap();
 
     Ok(LyricResult {
         id: pick.id,

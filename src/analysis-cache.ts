@@ -14,7 +14,11 @@
 import type { AnalysisCard } from "./analysis";
 
 const STORAGE_KEY = "lyriclens.desktop.analysis-cache";
-const CACHE_VERSION = 1;
+// Bump when a fix changes what the analysis pipeline *should* produce
+// for the same (trackKey, signature). v2 invalidates the v1 entries
+// that may have cached the ninelie-style "(End)" cards generated when
+// the search() candidate ranking picked a plain-only LRCLIB row.
+const CACHE_VERSION = 2;
 const MAX_ENTRIES = 50;
 
 type CacheEntry = {
