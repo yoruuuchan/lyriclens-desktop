@@ -61,6 +61,9 @@ type LyricResult = {
 type CmdError =
   | { kind: "no_session" }
   | { kind: "not_found" }
+  | { kind: "timeout"; message: string }
+  | { kind: "connect"; message: string }
+  | { kind: "http_status"; message: string; status: number }
   | { kind: "error"; message: string };
 
 type Theme = "akari" | "yoru";
@@ -848,6 +851,35 @@ function renderLyrics() {
   }
 }
 
+// Translate the typed CmdError from the Rust side into a single-line
+// status the user can actually act on. "error sending request for url
+// ..." used to leak straight through from reqwest; that read like a bug
+// rather than a connectivity hiccup. Each transport kind now gets its
+// own plain-Chinese phrasing.
+function describeLyricFetchError(err: unknown): string {
+  const e = err as CmdError | { message?: string };
+  const kind = (e as CmdError)?.kind;
+  switch (kind) {
+    case "not_found":
+      return "LRCLIB 没找到这首歌。";
+    case "timeout":
+      return "查询超时 · LRCLIB 一直没回应（重试过一次仍失败）";
+    case "connect":
+      return "连不上 LRCLIB · 网络可能被拦截，稍后再试";
+    case "http_status": {
+      const { status } = e as Extract<CmdError, { kind: "http_status" }>;
+      return status >= 500
+        ? `LRCLIB 服务暂时不可用 · HTTP ${status}`
+        : `LRCLIB 拒绝请求 · HTTP ${status}`;
+    }
+    case "error":
+    default: {
+      const msg = (e as { message?: string })?.message ?? String(err);
+      return `查询出错 · ${msg}`;
+    }
+  }
+}
+
 async function fetchLyricsFor(np: NowPlaying) {
   const key = trackKey(np);
   if (state.fetchingLyricsKey === key) return;
@@ -895,12 +927,7 @@ async function fetchLyricsFor(np: NowPlaying) {
       state.lyricsMessage = "LRCLIB 命中但歌词为空。";
     }
   } catch (err) {
-    const e = err as CmdError;
-    if (e?.kind === "not_found") {
-      state.lyricsMessage = "LRCLIB 没找到这首歌。";
-    } else {
-      state.lyricsMessage = `查询出错 · ${(e as { message?: string })?.message ?? String(err)}`;
-    }
+    state.lyricsMessage = describeLyricFetchError(err);
     state.lines = [];
   } finally {
     if (state.fetchingLyricsKey === key) {
