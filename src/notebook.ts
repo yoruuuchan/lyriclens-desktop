@@ -65,3 +65,10 @@ export async function listEntries(): Promise<NotebookEntry[]> {
 export async function removeEntry(id: string): Promise<boolean> {
   return invoke<boolean>("notebook_remove", { id });
 }
+
+// JSON export — JS-side picks the path via tauri-plugin-dialog's save
+// dialog, then hands it to the Rust command which writes the file and
+// returns the entry count for the success toast.
+export async function exportEntriesJsonToPath(path: string): Promise<number> {
+  return invoke<number>("notebook_export_json_to_path", { path });
+}

@@ -25,6 +25,8 @@ pub enum NotebookError {
     Db(#[from] rusqlite::Error),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -246,6 +248,36 @@ pub fn remove(conn: &Connection, id: &str) -> Result<bool, NotebookError> {
     Ok(affected > 0)
 }
 
+// JSON export — schema doc §"JSON 导出 / 导入格式" locks the top-level
+// shape. The payload is what the Android reviewer app will eat as its
+// MVP corpus, so the schema string is load-bearing: a reader that sees
+// anything other than "lyriclens.notebook.v1" is supposed to refuse,
+// not best-effort parse. `entries` order follows list()'s starred_at
+// DESC, but the schema explicitly says order isn't guaranteed.
+pub fn build_export_payload(
+    conn: &Connection,
+) -> Result<(serde_json::Value, usize), NotebookError> {
+    let entries = list(conn)?;
+    let count = entries.len();
+    let payload = serde_json::json!({
+        "schema": "lyriclens.notebook.v1",
+        "exportedAt": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        "exportedFrom": "desktop",
+        "entries": entries,
+    });
+    Ok((payload, count))
+}
+
+pub fn export_to_path(conn: &Connection, path: &Path) -> Result<usize, NotebookError> {
+    let (payload, count) = build_export_payload(conn)?;
+    // Pretty-print so a human (Yoru) opening the file in VS Code sees
+    // something legible — readers (Android app, future import command)
+    // don't care about whitespace.
+    let serialized = serde_json::to_string_pretty(&payload)?;
+    std::fs::write(path, serialized)?;
+    Ok(count)
+}
+
 fn get_by_business_key(
     conn: &Connection,
     song_key: &str,
@@ -432,5 +464,109 @@ mod tests {
         entry.updated_at = 1_000;
         let err = upsert(&conn, &entry).unwrap_err();
         assert!(matches!(err, NotebookError::Validation(_)));
+    }
+
+    #[test]
+    fn export_payload_has_schema_envelope_and_all_entries() {
+        let conn = fresh_db();
+        upsert(
+            &conn,
+            &sample_entry(
+                "11111111-1111-4111-8111-111111111111",
+                "song-a|artist|200",
+                0,
+            ),
+        )
+        .unwrap();
+        upsert(
+            &conn,
+            &sample_entry(
+                "22222222-2222-4222-8222-222222222222",
+                "song-b|artist|200",
+                1,
+            ),
+        )
+        .unwrap();
+        upsert(
+            &conn,
+            &sample_entry(
+                "33333333-3333-4333-8333-333333333333",
+                "song-c|artist|200",
+                2,
+            ),
+        )
+        .unwrap();
+
+        let (payload, count) = build_export_payload(&conn).unwrap();
+        assert_eq!(count, 3);
+        assert_eq!(payload["schema"], "lyriclens.notebook.v1");
+        assert_eq!(payload["exportedFrom"], "desktop");
+        let exported_at = payload["exportedAt"].as_str().expect("exportedAt is string");
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(exported_at).is_ok(),
+            "exportedAt should be RFC3339, got {exported_at:?}",
+        );
+        let entries = payload["entries"].as_array().expect("entries is array");
+        assert_eq!(entries.len(), 3);
+        // Round-trip the first entry back through NotebookEntry to make
+        // sure the camelCase serialization isn't lossy.
+        let back: NotebookEntry =
+            serde_json::from_value(entries[0].clone()).expect("entry round-trip");
+        assert!(!back.song_title.is_empty());
+        assert!(!back.song_key.is_empty());
+    }
+
+    #[test]
+    fn export_preserves_special_chars_in_user_note() {
+        // The Android consumer treats userNote as opaque user text — if
+        // serde_json mangles `\n` / `"` / `\t` here, the round-trip on
+        // the other side breaks silently and we'd never know until users
+        // complained. Lock the behaviour with a test.
+        let conn = fresh_db();
+        let mut entry = sample_entry(
+            "11111111-1111-4111-8111-111111111111",
+            "song|artist|200",
+            0,
+        );
+        entry.user_note = "line1\n\"quoted\"\ttab後の文字".into();
+        upsert(&conn, &entry).unwrap();
+
+        let (payload, _) = build_export_payload(&conn).unwrap();
+        let entries = payload["entries"].as_array().unwrap();
+        let back: NotebookEntry = serde_json::from_value(entries[0].clone()).unwrap();
+        assert_eq!(back.user_note, "line1\n\"quoted\"\ttab後の文字");
+    }
+
+    #[test]
+    fn export_to_path_writes_parseable_file() {
+        let conn = fresh_db();
+        upsert(
+            &conn,
+            &sample_entry(
+                "11111111-1111-4111-8111-111111111111",
+                "song-a|artist|200",
+                0,
+            ),
+        )
+        .unwrap();
+
+        // tempfile is one more dep we don't otherwise need; cobble a
+        // unique name out of pid + nanos and clean up at the end.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir()
+            .join(format!("lyriclens-test-export-{}-{}.json", std::process::id(), nanos));
+
+        let count = export_to_path(&conn, &path).unwrap();
+        assert_eq!(count, 1);
+
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed["schema"], "lyriclens.notebook.v1");
+        assert_eq!(parsed["entries"].as_array().unwrap().len(), 1);
+
+        let _ = std::fs::remove_file(&path);
     }
 }

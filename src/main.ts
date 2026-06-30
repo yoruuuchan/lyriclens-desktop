@@ -5,6 +5,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   analysisSettingsSignature,
   buildDefaultFocus,
@@ -25,6 +26,7 @@ import {
   writeAnalysisCache,
 } from "./analysis-cache";
 import {
+  exportEntriesJsonToPath,
   listEntries,
   makeSongKey,
   newEntryId,
@@ -311,7 +313,6 @@ const el = {
   testStatus: () => $("#test-status"),
   testBtn: () => $<HTMLButtonElement>("#btn-test-conn"),
   saveToast: () => $("#save-toast"),
-  saveToastTime: () => $("#save-toast-time"),
   aboutVersion: () => $("#about-version"),
   updSub: () => $("#upd-sub"),
   // form fields
@@ -349,6 +350,7 @@ const el = {
   notebookCount: () => $("#notebook-count"),
   notebookList: () => $("#notebook-list"),
   notebookRefresh: () => $<HTMLButtonElement>("#btn-notebook-refresh"),
+  notebookExportJson: () => $<HTMLButtonElement>("#btn-notebook-export-json"),
   notebookBatchBar: () => $("#notebook-batch-bar"),
   // analysis cache
   cacheStats: () => $("#cache-stats"),
@@ -963,6 +965,45 @@ async function deleteSelectedNotebookEntries(): Promise<void> {
   renderNotebookPanel();
   if (removedCount < ids.length) {
     console.warn(`notebook batch delete: removed ${removedCount}/${ids.length}`);
+  }
+}
+
+async function exportNotebookJson(): Promise<void> {
+  // YYYY-MM-DD in local time — matches what Yoru sees on the system
+  // clock when she's looking at the file picker; the schema's
+  // exportedAt field carries the precise UTC timestamp anyway, so a
+  // local-time filename here is purely a usability nudge.
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = (now.getMonth() + 1).toString().padStart(2, "0");
+  const dd = now.getDate().toString().padStart(2, "0");
+  const defaultName = `lyriclens-notebook-${yyyy}-${mm}-${dd}.json`;
+
+  let path: string | null;
+  try {
+    path = await saveDialog({
+      title: "导出笔记本 JSON",
+      defaultPath: defaultName,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+  } catch (err) {
+    console.warn("notebook export · save dialog failed", err);
+    showToast("打开保存对话框失败");
+    return;
+  }
+  if (!path) return; // user cancelled
+
+  try {
+    const count = await exportEntriesJsonToPath(path);
+    const basename = path.split(/[\\/]/).pop() ?? path;
+    showToast(`已导出 ${count} 条 · ${basename}`);
+  } catch (err) {
+    const msg =
+      typeof err === "object" && err && "message" in err
+        ? (err as { message?: string }).message ?? String(err)
+        : String(err);
+    console.warn("notebook export failed", err);
+    showToast(`导出失败 · ${msg}`);
   }
 }
 
@@ -1894,12 +1935,19 @@ function readForm(): Settings {
 }
 
 function showSavedToast() {
-  const toast = el.saveToast();
   const now = new Date();
-  el.saveToastTime().textContent = `${now.getHours().toString().padStart(2, "0")}:${now
-    .getMinutes()
-    .toString()
-    .padStart(2, "0")}`;
+  const hh = now.getHours().toString().padStart(2, "0");
+  const mm = now.getMinutes().toString().padStart(2, "0");
+  showToast(`已保存 · ${hh}:${mm}`);
+}
+
+// Generic toast for one-shot notifications. Reuses the .save-toast
+// surface so it stays at the same spot Yoru already expects feedback
+// to appear; the text is rewritten on every call so consecutive
+// toasts (e.g. save → export) just overwrite each other cleanly.
+function showToast(message: string) {
+  const toast = el.saveToast();
+  toast.textContent = message;
   toast.classList.add("show");
   setTimeout(() => toast.classList.remove("show"), 1800);
 }
@@ -2189,6 +2237,9 @@ function bindSettingsForm() {
       await loadNotebookEntries();
       renderNotebookPanel();
     })();
+  });
+  el.notebookExportJson().addEventListener("click", () => {
+    void exportNotebookJson();
   });
   // Checkbox change → toggle the entry's id in selectedIds. Bound on
   // the input "change" event rather than "click" so keyboard space
