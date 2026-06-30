@@ -38,6 +38,11 @@ async fn smtc_now_playing() -> Result<smtc::NowPlaying, CmdError> {
 }
 
 #[tauri::command]
+async fn smtc_all_sessions() -> Result<Vec<smtc::NowPlaying>, CmdError> {
+    Ok(smtc::all_sessions().await?)
+}
+
+#[tauri::command]
 async fn lrclib_find(
     track_name: String,
     artist_name: String,
@@ -59,6 +64,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             smtc_now_playing,
+            smtc_all_sessions,
             lrclib_find,
             lrclib_parse_synced,
         ])

@@ -28,7 +28,29 @@ type NowPlaying = {
   title: string; artist: string; album: string;
   durationMs: number; positionMs: number; capturedAtMs: number;
   status: string;
+  // SMTC LastUpdatedTime as Unix ms. 0 → source has never reported
+  // timeline; if it stops changing while status is "playing", the source
+  // isn't pushing updates.
+  lastUpdatedRawMs: number;
+  // SMTC PlaybackRate (1.0 = normal). null when the source doesn't
+  // report it — treat as 1.0 for extrapolation.
+  playbackRate: number | null;
+  // e.g. "Spotify.exe", used by the debug panel to disambiguate sibling
+  // sessions when Windows brokers multiple media apps at once.
+  sourceAppUserModelId: string;
 };
+// Layered timeline classification, per SMTC timeline research §7.3.
+// `timeline_healthy`/`timeline_candidate` → per-line sync is safe;
+// `metadata_only`/`timeline_dead` → fall back to expandAll cards;
+// `timeline_unstable` → show cards but flag the user that sync is
+// jumpy. `unknown` is the boot state before we have any snapshot.
+type TimelineHealth =
+  | "unknown"
+  | "metadata_only"
+  | "timeline_candidate"
+  | "timeline_healthy"
+  | "timeline_unstable"
+  | "timeline_dead";
 type LyricLine = { timeMs: number; text: string };
 type LyricResult = {
   id: number; trackName: string; artistName: string;
@@ -298,6 +320,9 @@ const el = {
   fbCount: () => $("#fb-count"),
   fbStatus: () => $("#fb-status"),
   fbSend: () => $<HTMLButtonElement>("#btn-fb-send"),
+  // debug
+  debugCurrent: () => $("#debug-current"),
+  debugAllSessions: () => $("#debug-all-sessions"),
 };
 
 // ─── state ───────────────────────────────────────────────────
@@ -332,7 +357,113 @@ const state = {
   // each second wipes and rebuilds the lyric list, retriggering the
   // analysis-card-enter animation and making cards visibly flicker.
   lastLyricsHtml: "",
+  // Rolling window of NowPlaying snapshots for the *current* trackKey.
+  // Feeds classifyTimeline so we can tell metadata_only from
+  // timeline_healthy / timeline_unstable. Cleared on track change so a
+  // healthy previous song doesn't paper over a broken new one.
+  snapshots: [] as NowPlaying[],
+  timelineHealth: "unknown" as TimelineHealth,
+  // Populated by pollAllSessions only while the debug panel is open, so
+  // we don't pay for an extra Tauri command every second when nobody is
+  // looking.
+  allSessions: [] as NowPlaying[],
+  debugPanelOpen: false,
 };
+
+const SNAPSHOT_WINDOW = 5;
+
+function pushSnapshot(np: NowPlaying) {
+  state.snapshots.push(np);
+  if (state.snapshots.length > SNAPSHOT_WINDOW) {
+    state.snapshots.splice(0, state.snapshots.length - SNAPSHOT_WINDOW);
+  }
+}
+
+// Port of SMTC timeline research §7.3, with tighter false-positive
+// guards: we refuse to call timeline "healthy" until we've actually
+// observed position advance at a sane rate. Players that publish a
+// frozen position (NetEase Win32 in some builds) or only push a
+// one-shot snapshot would otherwise be mis-classified as healthy.
+// Buckets drive renderLyrics: healthy/candidate → per-line sync,
+// metadata_only/dead → expand all cards, unstable → cards + warning.
+function classifyTimeline(snapshots: NowPlaying[]): TimelineHealth {
+  if (snapshots.length === 0) return "unknown";
+  const latest = snapshots[snapshots.length - 1];
+  if (!latest.title && !latest.artist) return "unknown";
+
+  const hasDuration = latest.durationMs > 30_000;
+  const hasPosition =
+    latest.positionMs >= 0 && latest.positionMs <= latest.durationMs + 2_000;
+
+  // No usable duration AND position pinned at 0 → the player only ever
+  // hands us metadata (NetEase Win32, QQ Music with SMTC disabled, etc).
+  if (!hasDuration && latest.positionMs === 0) return "metadata_only";
+  if (!hasDuration || !hasPosition) return "timeline_unstable";
+
+  // We need at least 3 snapshots before we can tell "real timeline" from
+  // "frozen at first tick". Until we get there, stay honest with unknown
+  // so the UI can show "等待" instead of flashing green.
+  if (snapshots.length < 3) return "unknown";
+
+  const recent = snapshots.slice(-5);
+  const lastUpdatedChanged = recent.some(
+    (s, i) => i > 0 && s.lastUpdatedRawMs !== recent[i - 1].lastUpdatedRawMs,
+  );
+
+  // While "playing", position should advance by roughly dt * rate per
+  // tick. If it advances by < 10% of that across a >2s window, the
+  // player is faking a timeline — promote to metadata_only (no
+  // LastUpdatedTime activity) or candidate (player still pings, but
+  // position is frozen, so per-line sync would be wrong).
+  if (latest.status === "playing") {
+    let totalDt = 0;
+    let totalAdvance = 0;
+    for (let i = 1; i < recent.length; i++) {
+      const dt = recent[i].capturedAtMs - recent[i - 1].capturedAtMs;
+      if (dt <= 0) continue;
+      totalDt += dt;
+      totalAdvance += recent[i].positionMs - recent[i - 1].positionMs;
+    }
+    if (totalDt >= 2_000) {
+      const rate = latest.playbackRate ?? 1;
+      const expected = totalDt * rate;
+      const ratio = expected > 0 ? totalAdvance / expected : 0;
+      if (ratio < 0.1) {
+        return lastUpdatedChanged ? "timeline_candidate" : "metadata_only";
+      }
+    }
+  }
+
+  // Big delta between observed position and locally extrapolated
+  // position = the player is jumping around. Apple Music on Windows is
+  // the canonical case; Lyricify's docs called out unstable timelines
+  // there too.
+  const jumpy = recent.some((s, i) => {
+    if (i === 0) return false;
+    const prev = recent[i - 1];
+    const dtMs = s.capturedAtMs - prev.capturedAtMs;
+    if (dtMs <= 0) return false;
+    const rate = prev.playbackRate ?? 1;
+    const predicted =
+      prev.status === "playing" ? prev.positionMs + dtMs * rate : prev.positionMs;
+    return Math.abs(s.positionMs - predicted) > 3_000;
+  });
+
+  if (jumpy) return "timeline_unstable";
+  return "timeline_healthy";
+}
+
+function timelineHealthLabel(h: TimelineHealth): string {
+  switch (h) {
+    case "timeline_healthy": return "Healthy";
+    case "timeline_candidate": return "Candidate";
+    case "timeline_unstable": return "Unstable";
+    case "metadata_only": return "Metadata only";
+    case "timeline_dead": return "Dead";
+    case "unknown":
+    default: return "Unknown";
+  }
+}
 
 // ─── lyric flow ──────────────────────────────────────────────
 
@@ -407,38 +538,6 @@ function resetAnalysis(trackKeyValue = "") {
   state.analysis.cards = new Map();
   state.analysis.message = "";
   state.analysis.controller = null;
-}
-
-function renderAnalysisLoadingCard(): string {
-  return `<article class="analysis-card loading" aria-label="学习卡片生成中">
-    <div class="analysis-head">
-      <div class="analysis-kicker">
-        <span class="analysis-dot" aria-hidden="true"></span>
-        <span class="analysis-title">analysis</span>
-      </div>
-      <span class="analysis-status">thinking</span>
-    </div>
-    <div class="translation-block" aria-hidden="true">
-      <span class="typing-dot"></span>
-      <span class="typing-dot"></span>
-      <span class="typing-dot"></span>
-    </div>
-  </article>`;
-}
-
-function renderAnalysisMessageCard(kind: "setup" | "error", message: string): string {
-  return `<article class="analysis-card message ${kind}" aria-label="学习卡片状态">
-    <div class="analysis-head">
-      <div class="analysis-kicker">
-        <span class="analysis-dot" aria-hidden="true"></span>
-        <span class="analysis-title">analysis</span>
-      </div>
-      <span class="analysis-status">${kind}</span>
-    </div>
-    <div class="translation-block">
-      <p class="translation-text">${escapeHtml(message)}</p>
-    </div>
-  </article>`;
 }
 
 function renderAnalysisCard(card: AnalysisCard): string {
@@ -521,9 +620,23 @@ function renderAnalysisStatusLine(activeIdx: number, expandAll: boolean): string
       </div>`;
     }
     if (expandAll) {
+      // Different reasons end up in the same expand-all rendering — be
+      // specific so the user knows whether to switch player vs wait.
+      const reason =
+        state.timelineHealth === "timeline_dead"
+          ? "播放器停止上报 timeline"
+          : state.timelineHealth === "metadata_only"
+            ? "播放器只暴露歌曲信息，timeline 不可用"
+            : "未拿到可用的 timeline";
       return `<div class="analysis-status-line ready" role="status">
         <span class="analysis-dot" aria-hidden="true"></span>
-        <span>播放器未提供 timeline · 已铺开全部 ${total} 张精选卡片</span>
+        <span>${reason} · 已铺开全部 ${total} 张精选卡片</span>
+      </div>`;
+    }
+    if (state.timelineHealth === "timeline_unstable") {
+      return `<div class="analysis-status-line setup" role="status">
+        <span class="analysis-dot" aria-hidden="true"></span>
+        <span>timeline 不稳定 · 卡片同步可能有偏移（${total} 张已就绪）</span>
       </div>`;
     }
     if (activeIdx < 0 || !analysis.cards.has(activeIdx)) {
@@ -654,14 +767,18 @@ function renderLyrics() {
     if (state.lines[i].timeMs <= pos) activeIdx = i;
     else break;
   }
-  // If the player doesn't expose a timeline (NetEase / QQ desktop client
-  // are the canonical culprits), there is no active line to anchor cards
-  // to. Switch to "expand all" so the user can still read every card the
-  // model produced. We key on durationMs because positionMs=0 alone is
-  // ambiguous (could just be the intro).
-  const hasTimeline = (state.np?.durationMs ?? 0) > 0;
+  // Timeline health drives the layout: when SMTC isn't giving us a
+  // usable position (NetEase/QQ Win32 = `metadata_only`, sources that
+  // stopped reporting = `timeline_dead`), there's no active line to
+  // anchor cards to, so we fan all of them out. `timeline_unstable`
+  // still has a position, just jittery — we keep per-line sync and let
+  // the status line warn the user. `timeline_candidate` is good enough
+  // for per-line; we only fail closed on metadata_only/dead.
+  const noTimeline =
+    state.timelineHealth === "metadata_only" ||
+    state.timelineHealth === "timeline_dead";
   const expandAll =
-    !hasTimeline &&
+    noTimeline &&
     state.analysis.status === "ready" &&
     state.analysis.cards.size > 0;
   const statusLine = renderAnalysisStatusLine(activeIdx, expandAll);
@@ -759,6 +876,80 @@ async function fetchLyricsFor(np: NowPlaying) {
   }
 }
 
+// Per-session snapshot windows for the debug panel. Each row in
+// "全部 SMTC 会话" needs its own classification, so we key on
+// SourceAppUserModelId. Cleared whenever debug panel closes to keep this
+// from leaking memory across long sessions.
+const allSessionSnapshots = new Map<string, NowPlaying[]>();
+
+function fmtUnixMs(ms: number | null | undefined): string {
+  if (!ms || ms <= 0) return "—";
+  const d = new Date(ms);
+  const hh = d.getHours().toString().padStart(2, "0");
+  const mm = d.getMinutes().toString().padStart(2, "0");
+  const ss = d.getSeconds().toString().padStart(2, "0");
+  const mmm = d.getMilliseconds().toString().padStart(3, "0");
+  return `${hh}:${mm}:${ss}.${mmm}`;
+}
+
+function fmtRate(rate: number | null): string {
+  if (rate === null || rate === undefined) return "null";
+  return rate.toFixed(2) + "×";
+}
+
+function renderSessionCard(np: NowPlaying, health: TimelineHealth): string {
+  const healthClass = `health-${health.replace(/_/g, "-")}`;
+  const healthLabel = timelineHealthLabel(health);
+  const source = np.sourceAppUserModelId || "(未上报)";
+  const trackLabel = np.title
+    ? `${np.title}${np.artist ? " · " + np.artist : ""}`
+    : "(无元数据)";
+  return `<article class="debug-card">
+    <header class="debug-card-head">
+      <div class="debug-card-title">
+        <span class="debug-source mono">${escapeHtml(source)}</span>
+        <span class="debug-track">${escapeHtml(trackLabel)}</span>
+      </div>
+      <span class="health-badge ${healthClass}" title="timeline health">${escapeHtml(healthLabel)}</span>
+    </header>
+    <div class="debug-grid">
+      <div class="kv-row"><span class="kv-key">status</span><span class="kv-val mono">${escapeHtml(np.status)}</span></div>
+      <div class="kv-row"><span class="kv-key">position / duration</span><span class="kv-val mono">${formatTime(np.positionMs)} / ${formatTime(np.durationMs)}</span></div>
+      <div class="kv-row"><span class="kv-key">positionMs</span><span class="kv-val mono">${np.positionMs}</span></div>
+      <div class="kv-row"><span class="kv-key">durationMs</span><span class="kv-val mono">${np.durationMs}</span></div>
+      <div class="kv-row"><span class="kv-key">lastUpdated</span><span class="kv-val mono">${fmtUnixMs(np.lastUpdatedRawMs)}</span></div>
+      <div class="kv-row"><span class="kv-key">capturedAt</span><span class="kv-val mono">${fmtUnixMs(np.capturedAtMs)}</span></div>
+      <div class="kv-row"><span class="kv-key">playbackRate</span><span class="kv-val mono">${fmtRate(np.playbackRate)}</span></div>
+    </div>
+  </article>`;
+}
+
+function renderDebugPanel() {
+  const current = el.debugCurrent();
+  if (current) {
+    if (state.np) {
+      current.innerHTML = renderSessionCard(state.np, state.timelineHealth);
+    } else {
+      current.innerHTML = `<p class="placeholder">没有当前会话（SMTC 没暴露 current session）。</p>`;
+    }
+  }
+
+  const all = el.debugAllSessions();
+  if (all) {
+    if (state.allSessions.length === 0) {
+      all.innerHTML = `<p class="placeholder">没有任何 SMTC 会话。</p>`;
+    } else {
+      all.innerHTML = state.allSessions
+        .map((s) => {
+          const id = s.sourceAppUserModelId || `${s.title}|${s.artist}`;
+          const buf = allSessionSnapshots.get(id) ?? [s];
+          return renderSessionCard(s, classifyTimeline(buf));
+        })
+        .join("");
+    }
+  }
+}
+
 async function pollSmtc() {
   try {
     const np = await invoke<NowPlaying>("smtc_now_playing");
@@ -766,24 +957,55 @@ async function pollSmtc() {
     const key = trackKey(np);
     if (key && key !== state.trackKey) {
       state.trackKey = key;
+      // New song → reset the classification window. Otherwise a healthy
+      // previous track's snapshots would mask a broken new track for ~5s.
+      state.snapshots = [];
+      state.timelineHealth = "unknown";
       if (state.settings.autoAnalyze) fetchLyricsFor(np);
     }
+    pushSnapshot(np);
+    state.timelineHealth = classifyTimeline(state.snapshots);
   } catch (err) {
     const e = err as CmdError;
     if (e?.kind === "no_session") {
       state.np = null;
       state.trackKey = "";
       state.lines = [];
+      state.snapshots = [];
+      state.timelineHealth = "unknown";
       state.lyricsMessage = "没有活跃的 SMTC 会话。播放一首歌就行。";
       resetAnalysis();
     } else {
       state.np = null;
+      state.snapshots = [];
+      state.timelineHealth = "unknown";
       state.lyricsMessage = `SMTC 出错 · ${(e as { message?: string })?.message ?? String(err)}`;
       resetAnalysis();
     }
   }
   renderNowPlaying();
   renderLyrics();
+  if (state.debugPanelOpen) {
+    // Fetch the full session list only while the user is looking at the
+    // debug tab. Failures here are silently ignored — the panel will
+    // simply show the last known list.
+    try {
+      const sessions = await invoke<NowPlaying[]>("smtc_all_sessions");
+      state.allSessions = sessions;
+      for (const s of sessions) {
+        const id = s.sourceAppUserModelId || `${s.title}|${s.artist}`;
+        const buf = allSessionSnapshots.get(id) ?? [];
+        buf.push(s);
+        if (buf.length > SNAPSHOT_WINDOW) {
+          buf.splice(0, buf.length - SNAPSHOT_WINDOW);
+        }
+        allSessionSnapshots.set(id, buf);
+      }
+    } catch {
+      // ignored
+    }
+    renderDebugPanel();
+  }
 }
 
 // ─── settings overlay ────────────────────────────────────────
@@ -805,6 +1027,10 @@ function closeSettings() {
   applyTheme(state.settings.theme);
   applyFontSize(state.settings.fontSize);
   applyOpacity(state.settings.panelOpacity);
+  // Stop paying for smtc_all_sessions when nobody's looking, and drop
+  // the per-session snapshot buffers so they don't grow unbounded.
+  state.debugPanelOpen = false;
+  allSessionSnapshots.clear();
 }
 
 function switchTab(name: string) {
@@ -814,6 +1040,16 @@ function switchTab(name: string) {
   document.querySelectorAll<HTMLElement>(".tab-panel").forEach((p) =>
     p.classList.toggle("is-active", p.dataset.tab === name),
   );
+  const isDebug = name === "debug";
+  if (isDebug !== state.debugPanelOpen) {
+    state.debugPanelOpen = isDebug;
+    if (!isDebug) allSessionSnapshots.clear();
+  }
+  if (isDebug) {
+    // Trigger an immediate fetch so the panel doesn't sit empty for up
+    // to a second waiting for the next pollSmtc tick.
+    void pollSmtc();
+  }
 }
 
 function setDirty(dirty: boolean) {
