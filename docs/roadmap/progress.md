@@ -13,6 +13,42 @@ tags: `[plan]` route decision / `[ship]` shipped functionality / `[probe]` probe
 
 ---
 
+## 2026-06-30 [ship] MVP UI/数据壳子完整，差 LLM 接入
+
+承接 scaffold 那条，一天内把 MVP 的 UI/数据壳子做齐了。**唯一缺的是 LLM 调用** —— 拉到 LRC 但没让模型生成卡片。
+
+做了什么：
+- SMTC reader（windows-rs `Media_Control`，`.get()` + `spawn_blocking`）
+- LRCLIB client（`/api/get` + `/api/search` fallback，LRC parser 3 单测全过）
+- 同步滚动 UI（vanilla TS + position 外推，200ms 重渲染节奏）
+- 接入 `yoru-and-akari Console Design System`（tokens.css 复制 + 本地化删 Google Fonts @import）
+- 字体本地化（Geist + Geist Mono variable + Noto Sans SC chinese-simplified，woff2 + inline @font-face + font-display block）
+- 真窗口透明（tauri `transparent: true` + `.app` 用 `rgb(.../-window-alpha)`，卡片实色）
+- 设置 4 tab parity（常规 / AI 服务 / 高级 / 关于）+ 全套控件（toggle/slider/select/checkbox grid/details）
+- 测试连接 button（POST 1-token ping）
+- 反馈表单 POST 到 `lyriclens.yoru-and-akari.dev/feedback`，body tag `app: "lyriclens-desktop"`
+- 知识点改为 checkbox grid（不是 click chip）
+- 自定义 Prompt 折叠 details，`buildDefaultFocus` 移植到 main.ts，跟插件行为对齐
+
+真机验证轮次（Yoru 截图反馈了 5+ 轮）：
+1. SMTC 拉到「One Last Kiss / 宇多田ヒカル」但 LRCLIB 报 "error decoding response body" → `LyricResult` 没标 `rename_all = "camelCase"`，加上后修复
+2. 「为啥不按设计系统」→ 全量接 yoru-and-akari console design system
+3. 「字体好小」→ 字号锚定到插件 standard 档 (base 15px)
+4. 「字体还在 fallback」→ tokens.css 删 Google Fonts @import；inline @font-face + variable font
+5. 「感觉跟插件字体不一样」→ 中文加 Noto Sans SC，跟插件字体栈一致
+6. 「透明度把 UI 压灰了」→ tauri transparent + `.app` rgba 背景，不再碰 body.opacity
+7. 「插件设置页 vs exe 设置页就知道差别」→ 4 tab + 完整控件类型 parity
+8. 「知识点要 checkbox 不是点击 chip」、「Prompt 应该预填默认 + 折叠」→ checkbox grid + details + buildDefaultFocus 联动
+
+5 commits 在本地，没 push（仓库 `yoruuuchan/lyriclens-desktop` 还没建）。
+
+下一步：
+- 接 LLM 分析（Task #6，MVP 闭环最后一步）—— 这之前要先和 Yoru 对齐卡片渲染在 UI 哪里
+- `gh repo create` + push 到 GitHub
+- `npm run tauri build` 出 .msi 装包
+
+详细交接看 [HANDOFF-2026-06-30-bootstrap.md](HANDOFF-2026-06-30-bootstrap.md)（gitignored）。
+
 ## 2026-06-30 [ship] Scaffold lyriclens-desktop
 
 Bootstrapped the desktop host of LyricLens as an independent repo. Driven by the dual-host north star ratified in the plugin repo on 2026-06-29, with probes D (SMTC coverage) and E (LRCLIB hit rate) both green.
