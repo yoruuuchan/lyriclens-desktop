@@ -79,3 +79,18 @@ export async function exportEntriesJsonToPath(path: string): Promise<number> {
 export async function exportEntriesAnkiToPath(path: string): Promise<number> {
   return invoke<number>("notebook_export_anki_to_path", { path });
 }
+
+// JSON import — the Rust side parses the v1 envelope, applies the
+// schema doc's seven-step merge spec inside a transaction, and returns
+// per-bucket counts so the toast can summarize without a list refetch.
+export type ImportSummary = {
+  totalParsed: number;
+  imported: number;
+  merged: number;
+  skipped: number;
+  errors: string[];
+};
+
+export async function importEntriesFromPath(path: string): Promise<ImportSummary> {
+  return invoke<ImportSummary>("notebook_import_from_path", { path });
+}

@@ -136,6 +136,24 @@ async fn notebook_export_anki_to_path(
     Ok(notebook::export_anki_to_path(&conn, std::path::Path::new(&path))?)
 }
 
+// JSON import — JS picks the source file via the dialog plugin's open
+// API, Rust reads + validates the v1 envelope, transactionally merges
+// each entry, returns the ImportSummary so the toast can report the
+// new / merged / skipped counts.
+#[tauri::command]
+async fn notebook_import_from_path(
+    db: tauri::State<'_, notebook::DbHandle>,
+    path: String,
+) -> Result<notebook::ImportSummary, CmdError> {
+    let mut conn = db.lock().await;
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    Ok(notebook::import_from_path(
+        &mut conn,
+        std::path::Path::new(&path),
+        now_ms,
+    )?)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -162,6 +180,7 @@ pub fn run() {
             notebook_remove,
             notebook_export_json_to_path,
             notebook_export_anki_to_path,
+            notebook_import_from_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

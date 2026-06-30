@@ -58,6 +58,15 @@ pub enum EntrySource {
     Desktop,
 }
 
+impl EntrySource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EntrySource::Plugin => "plugin",
+            EntrySource::Desktop => "desktop",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NotebookEntry {
@@ -385,6 +394,202 @@ pub fn export_anki_to_path(conn: &Connection, path: &Path) -> Result<usize, Note
     Ok(count)
 }
 
+// JSON import — schema doc §"合并规则". `upsert()` above intentionally
+// preserves local starred_at and overwrites user_note (the user re-star
+// flow), which is the wrong semantics for import. So import has its own
+// low-level write path (`replace_full`) that takes a fully-merged entry
+// and writes every column verbatim, plus a `merge_into` helper that
+// follows the schema's seven-step merge spec.
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportSummary {
+    pub total_parsed: usize,
+    pub imported: usize,
+    pub merged: usize,
+    pub skipped: usize,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum MergeOutcome {
+    Merged,
+    SkippedDuplicate,
+}
+
+pub fn merge_into(
+    local: &NotebookEntry,
+    incoming: &NotebookEntry,
+    import_ts_ms: i64,
+    import_iso: &str,
+) -> (NotebookEntry, MergeOutcome) {
+    let incoming_source = incoming.source.as_str();
+    let marker_head = format!("---来自 {incoming_source}（");
+
+    // Schema's "跳过这条" trigger: same source marker is already in
+    // local AND the incoming.userNote text is already present verbatim.
+    // The double-check guards against a false positive when the user
+    // manually wrote a "---来自" line themselves.
+    if !incoming.user_note.is_empty()
+        && local.user_note.contains(&marker_head)
+        && local.user_note.contains(&incoming.user_note)
+    {
+        return (local.clone(), MergeOutcome::SkippedDuplicate);
+    }
+
+    let mut merged = local.clone();
+    // 1. id 保留为 local
+    // 2. userNote 拼接（incoming 空 → 不动 local）
+    if !incoming.user_note.is_empty() {
+        let separator =
+            format!("\n\n---来自 {incoming_source}（{import_iso}）---\n");
+        merged.user_note = format!(
+            "{}{}{}",
+            local.user_note, separator, incoming.user_note,
+        );
+    }
+    // 3. card 用 updatedAt 更晚的（防 prompt 回退）
+    if incoming.updated_at > local.updated_at {
+        merged.card = incoming.card.clone();
+    }
+    // 4. starredAt 用更早的（保留最早收藏时间语义）
+    merged.starred_at = local.starred_at.min(incoming.starred_at);
+    // 5. updatedAt = 本次 import 时间
+    merged.updated_at = import_ts_ms;
+    // 6. importMergedFrom 追加 incoming.id，去重防 A→B→A 死循环
+    let mut from = local.import_merged_from.clone().unwrap_or_default();
+    if !from.contains(&incoming.id) {
+        from.push(incoming.id.clone());
+    }
+    merged.import_merged_from = Some(from);
+    // 7. source 不变（合并后仍属于本地 host）
+
+    (merged, MergeOutcome::Merged)
+}
+
+// Writes every column verbatim — no ON CONFLICT preservation. Used by
+// import after `merge_into` produces a fully-resolved row. Must run
+// inside an existing transaction because import wraps the whole batch.
+fn replace_full(conn: &Connection, entry: &NotebookEntry) -> Result<(), NotebookError> {
+    validate(entry)?;
+    let card_json = serde_json::to_string(&entry.card)?;
+    let merged_json = entry
+        .import_merged_from
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()?;
+    conn.execute(
+        r#"
+        INSERT OR REPLACE INTO notebook_entries (
+            id, song_key, song_title, song_artist,
+            line_index, line_text, card_json, user_note,
+            starred_at, updated_at, source, import_merged_from_json
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        "#,
+        params![
+            entry.id,
+            entry.song_key,
+            entry.song_title,
+            entry.song_artist,
+            entry.line_index,
+            entry.line_text,
+            card_json,
+            entry.user_note,
+            entry.starred_at,
+            entry.updated_at,
+            entry.source.as_str(),
+            merged_json,
+        ],
+    )?;
+    Ok(())
+}
+
+// Top-level envelope mirror of build_export_payload's output. Used
+// only for parsing; the entries themselves go through NotebookEntry.
+#[derive(Debug, Deserialize)]
+struct ImportEnvelope {
+    schema: String,
+    entries: Vec<NotebookEntry>,
+}
+
+pub fn import_from_json_str(
+    conn: &mut Connection,
+    raw: &str,
+    import_ts_ms: i64,
+) -> Result<ImportSummary, NotebookError> {
+    let envelope: ImportEnvelope = serde_json::from_str(raw)?;
+    if envelope.schema != "lyriclens.notebook.v1" {
+        return Err(NotebookError::Validation(format!(
+            "unknown schema version: {:?} (expected lyriclens.notebook.v1)",
+            envelope.schema,
+        )));
+    }
+
+    let import_iso = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(import_ts_ms)
+        .unwrap_or_else(chrono::Utc::now)
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
+    let mut summary = ImportSummary {
+        total_parsed: envelope.entries.len(),
+        ..ImportSummary::default()
+    };
+
+    // One transaction around the whole batch — partial failures inside
+    // the loop (validation, merge-skip) are counted in the summary and
+    // don't abort the rest, but a SQL-level error rolls everything back.
+    let tx = conn.transaction()?;
+    for incoming in &envelope.entries {
+        if let Err(err) = validate(incoming) {
+            summary.skipped += 1;
+            summary.errors.push(err.to_string());
+            continue;
+        }
+
+        let local =
+            get_by_business_key(&tx, &incoming.song_key, incoming.line_index)?;
+        match local {
+            None => {
+                if let Err(err) = replace_full(&tx, incoming) {
+                    summary.skipped += 1;
+                    summary.errors.push(err.to_string());
+                } else {
+                    summary.imported += 1;
+                }
+            }
+            Some(local_entry) => {
+                let (merged, outcome) =
+                    merge_into(&local_entry, incoming, import_ts_ms, &import_iso);
+                match outcome {
+                    MergeOutcome::SkippedDuplicate => {
+                        summary.skipped += 1;
+                    }
+                    MergeOutcome::Merged => {
+                        if let Err(err) = replace_full(&tx, &merged) {
+                            summary.skipped += 1;
+                            summary.errors.push(err.to_string());
+                        } else {
+                            summary.merged += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    tx.commit()?;
+
+    Ok(summary)
+}
+
+pub fn import_from_path(
+    conn: &mut Connection,
+    path: &Path,
+    import_ts_ms: i64,
+) -> Result<ImportSummary, NotebookError> {
+    let raw = std::fs::read_to_string(path)?;
+    import_from_json_str(conn, &raw, import_ts_ms)
+}
+
 fn get_by_business_key(
     conn: &Connection,
     song_key: &str,
@@ -451,6 +656,11 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<NotebookEntr
 }
 
 #[cfg(test)]
+// Test names embed schema field names verbatim (userNote, starredAt,
+// updatedAt, importMergedFrom) — easier to grep against the schema doc
+// than camel-to-snake conversions. The non_snake_case warning here is
+// noise, so silence it module-wide.
+#[allow(non_snake_case)]
 mod tests {
     use super::*;
     use rusqlite::Connection;
@@ -777,5 +987,295 @@ mod tests {
         assert_eq!(parsed["entries"].as_array().unwrap().len(), 1);
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    // ─── import + merge tests ────────────────────────────────────
+
+    // Build a minimal valid v1 envelope around a single sample entry.
+    fn envelope_with(entries: &[NotebookEntry]) -> String {
+        serde_json::json!({
+            "schema": "lyriclens.notebook.v1",
+            "exportedAt": "2026-07-01T00:00:00Z",
+            "exportedFrom": "plugin",
+            "entries": entries,
+        })
+        .to_string()
+    }
+
+    const IMPORT_TS: i64 = 1_900_000_000_000;
+    const IMPORT_ISO: &str = "2030-03-16T12:26:40Z";
+
+    #[test]
+    fn import_inserts_new_entries_when_no_conflict() {
+        let mut conn = fresh_db();
+        let raw = envelope_with(&[
+            sample_entry(
+                "11111111-1111-4111-8111-111111111111",
+                "song-a|artist|200",
+                0,
+            ),
+            sample_entry(
+                "22222222-2222-4222-8222-222222222222",
+                "song-b|artist|200",
+                1,
+            ),
+        ]);
+
+        let summary = import_from_json_str(&mut conn, &raw, IMPORT_TS).unwrap();
+        assert_eq!(summary.total_parsed, 2);
+        assert_eq!(summary.imported, 2);
+        assert_eq!(summary.merged, 0);
+        assert_eq!(summary.skipped, 0);
+        assert!(summary.errors.is_empty());
+        assert_eq!(list(&conn).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn import_merges_userNote_with_source_marker() {
+        let mut conn = fresh_db();
+        // Local was authored on desktop.
+        let mut local = sample_entry(
+            "11111111-1111-4111-8111-111111111111",
+            "song|artist|200",
+            0,
+        );
+        local.user_note = "本地的笔记".into();
+        upsert(&conn, &local).unwrap();
+
+        // Incoming is from plugin host with a different note.
+        let mut incoming = sample_entry(
+            "22222222-2222-4222-8222-222222222222",
+            "song|artist|200",
+            0,
+        );
+        incoming.source = EntrySource::Plugin;
+        incoming.user_note = "插件那边写的笔记".into();
+        let raw = envelope_with(&[incoming]);
+
+        let summary = import_from_json_str(&mut conn, &raw, IMPORT_TS).unwrap();
+        assert_eq!(summary.merged, 1);
+        assert_eq!(summary.imported, 0);
+
+        let stored = list(&conn).unwrap();
+        assert_eq!(stored.len(), 1);
+        let merged_note = &stored[0].user_note;
+        assert!(merged_note.starts_with("本地的笔记"));
+        assert!(merged_note.contains("---来自 plugin（"));
+        assert!(merged_note.ends_with("插件那边写的笔记"));
+        // id preserved from local; importMergedFrom records incoming.id.
+        assert_eq!(stored[0].id, "11111111-1111-4111-8111-111111111111");
+        assert_eq!(
+            stored[0].import_merged_from.as_ref().unwrap(),
+            &vec!["22222222-2222-4222-8222-222222222222".to_string()],
+        );
+    }
+
+    #[test]
+    fn import_takes_newer_card_by_updatedAt() {
+        let mut conn = fresh_db();
+        let mut local = sample_entry(
+            "11111111-1111-4111-8111-111111111111",
+            "song|artist|200",
+            0,
+        );
+        local.updated_at = 1_700_000_000_000;
+        local.card.translation = "本地旧翻译".into();
+        upsert(&conn, &local).unwrap();
+
+        let mut incoming = sample_entry(
+            "22222222-2222-4222-8222-222222222222",
+            "song|artist|200",
+            0,
+        );
+        incoming.updated_at = 1_800_000_000_000;
+        incoming.card.translation = "导入的新翻译".into();
+        incoming.user_note = "".into(); // 空 userNote 不触发拼接
+        let raw = envelope_with(&[incoming]);
+
+        let _ = import_from_json_str(&mut conn, &raw, IMPORT_TS).unwrap();
+        let stored = list(&conn).unwrap();
+        assert_eq!(stored[0].card.translation, "导入的新翻译");
+        // updatedAt 设为本次 import 时间，不是 incoming 的
+        assert_eq!(stored[0].updated_at, IMPORT_TS);
+    }
+
+    #[test]
+    fn import_keeps_local_card_when_local_is_newer() {
+        let mut conn = fresh_db();
+        let mut local = sample_entry(
+            "11111111-1111-4111-8111-111111111111",
+            "song|artist|200",
+            0,
+        );
+        local.updated_at = 1_800_000_000_000;
+        local.card.translation = "本地新翻译".into();
+        upsert(&conn, &local).unwrap();
+
+        let mut incoming = sample_entry(
+            "22222222-2222-4222-8222-222222222222",
+            "song|artist|200",
+            0,
+        );
+        incoming.updated_at = 1_700_000_000_000;
+        incoming.card.translation = "导入的旧翻译".into();
+        incoming.user_note = "".into();
+        let raw = envelope_with(&[incoming]);
+
+        let _ = import_from_json_str(&mut conn, &raw, IMPORT_TS).unwrap();
+        let stored = list(&conn).unwrap();
+        assert_eq!(stored[0].card.translation, "本地新翻译");
+    }
+
+    #[test]
+    fn import_takes_earlier_starredAt() {
+        let mut conn = fresh_db();
+        let mut local = sample_entry(
+            "11111111-1111-4111-8111-111111111111",
+            "song|artist|200",
+            0,
+        );
+        local.starred_at = 1_800_000_000_000;
+        local.updated_at = 1_800_000_000_000;
+        upsert(&conn, &local).unwrap();
+
+        let mut incoming = sample_entry(
+            "22222222-2222-4222-8222-222222222222",
+            "song|artist|200",
+            0,
+        );
+        incoming.starred_at = 1_700_000_000_000;
+        incoming.updated_at = 1_700_000_000_000;
+        incoming.user_note = "".into();
+        let raw = envelope_with(&[incoming]);
+
+        let _ = import_from_json_str(&mut conn, &raw, IMPORT_TS).unwrap();
+        let stored = list(&conn).unwrap();
+        assert_eq!(
+            stored[0].starred_at, 1_700_000_000_000,
+            "earlier starred_at wins",
+        );
+    }
+
+    #[test]
+    fn import_skips_when_userNote_already_has_same_source_marker_and_content() {
+        let mut conn = fresh_db();
+        // Simulate a second import of the same plugin payload — first
+        // import left a "---来自 plugin（..." marker and the incoming
+        // note text in local.userNote, so a re-import should be a no-op.
+        let mut local = sample_entry(
+            "11111111-1111-4111-8111-111111111111",
+            "song|artist|200",
+            0,
+        );
+        local.user_note = "本地的笔记\n\n---来自 plugin（2026-06-15T12:00:00Z）---\n插件那边写的笔记".into();
+        upsert(&conn, &local).unwrap();
+
+        let mut incoming = sample_entry(
+            "22222222-2222-4222-8222-222222222222",
+            "song|artist|200",
+            0,
+        );
+        incoming.source = EntrySource::Plugin;
+        incoming.user_note = "插件那边写的笔记".into();
+        let raw = envelope_with(&[incoming]);
+
+        let summary = import_from_json_str(&mut conn, &raw, IMPORT_TS).unwrap();
+        assert_eq!(summary.skipped, 1);
+        assert_eq!(summary.merged, 0);
+        // local.user_note unchanged
+        let stored = list(&conn).unwrap();
+        assert!(stored[0].user_note.contains("---来自 plugin（2026-06-15T12:00:00Z）---"));
+        assert!(!stored[0].user_note.contains(IMPORT_ISO));
+    }
+
+    #[test]
+    fn import_appends_to_importMergedFrom_without_duplicating() {
+        let mut conn = fresh_db();
+        let mut local = sample_entry(
+            "11111111-1111-4111-8111-111111111111",
+            "song|artist|200",
+            0,
+        );
+        local.import_merged_from = Some(vec!["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into()]);
+        upsert(&conn, &local).unwrap();
+
+        // First incoming — different id, should append.
+        let mut incoming = sample_entry(
+            "22222222-2222-4222-8222-222222222222",
+            "song|artist|200",
+            0,
+        );
+        incoming.source = EntrySource::Plugin;
+        incoming.user_note = "first incoming".into();
+        let _ = import_from_json_str(&mut conn, &envelope_with(&[incoming.clone()]), IMPORT_TS).unwrap();
+
+        let after_first = list(&conn).unwrap();
+        assert_eq!(
+            after_first[0].import_merged_from.as_ref().unwrap(),
+            &vec![
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+                "22222222-2222-4222-8222-222222222222".to_string(),
+            ],
+        );
+
+        // Second import of an entry with the SAME id — should NOT
+        // duplicate the entry in importMergedFrom.
+        incoming.user_note = "second incoming".into();
+        let _ = import_from_json_str(&mut conn, &envelope_with(&[incoming]), IMPORT_TS + 1000).unwrap();
+        let after_second = list(&conn).unwrap();
+        let from = after_second[0].import_merged_from.as_ref().unwrap();
+        assert_eq!(
+            from.iter().filter(|s| s.as_str() == "22222222-2222-4222-8222-222222222222").count(),
+            1,
+            "incoming.id must appear only once",
+        );
+    }
+
+    #[test]
+    fn import_rejects_unknown_schema_version() {
+        let mut conn = fresh_db();
+        let raw = serde_json::json!({
+            "schema": "lyriclens.notebook.v2",
+            "exportedAt": "2026-07-01T00:00:00Z",
+            "exportedFrom": "desktop",
+            "entries": [],
+        })
+        .to_string();
+        let err = import_from_json_str(&mut conn, &raw, IMPORT_TS).unwrap_err();
+        assert!(
+            matches!(err, NotebookError::Validation(ref msg) if msg.contains("unknown schema version")),
+            "got {err:?}",
+        );
+    }
+
+    #[test]
+    fn import_counts_validation_failures_as_skipped() {
+        let mut conn = fresh_db();
+        // Two entries: one valid, one with an invalid uuid → should
+        // skip the bad one, still import the good one.
+        let good = sample_entry(
+            "11111111-1111-4111-8111-111111111111",
+            "song-good|artist|200",
+            0,
+        );
+        let mut bad = sample_entry(
+            "11111111-1111-4111-8111-111111111111", // valid here…
+            "song-bad|artist|200",
+            0,
+        );
+        // …but rewrite id post-build to bypass validate in sample_entry.
+        // serde_json::to_value then mutate the JSON tree directly so the
+        // envelope contains a structurally bad row.
+        let mut v = serde_json::to_value(&bad).unwrap();
+        v["id"] = serde_json::json!("not-a-uuid");
+        bad = serde_json::from_value(v).unwrap();
+
+        let raw = envelope_with(&[good, bad]);
+        let summary = import_from_json_str(&mut conn, &raw, IMPORT_TS).unwrap();
+        assert_eq!(summary.total_parsed, 2);
+        assert_eq!(summary.imported, 1);
+        assert_eq!(summary.skipped, 1);
+        assert_eq!(summary.errors.len(), 1);
+        assert!(summary.errors[0].contains("uuid"));
     }
 }
