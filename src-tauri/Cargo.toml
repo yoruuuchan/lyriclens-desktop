@@ -1,0 +1,33 @@
+[package]
+name = "lyriclens-desktop"
+version = "0.1.0"
+description = "LyricLens desktop — SMTC + LRCLIB + LLM lyric companion"
+authors = ["Yoru <yoru@yoru-and-akari.dev>"]
+edition = "2021"
+
+[lib]
+name = "lyriclens_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip"] }
+anyhow = "1"
+thiserror = "2"
+log = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Media",
+    "Media_Control",
+    "Storage_Streams",
+] }

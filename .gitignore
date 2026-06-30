@@ -1,0 +1,44 @@
+# Rust / Cargo build output
+**/target/
+*.pdb
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.local
+.vite/
+
+# Vite build output
+dist/
+dist-ssr/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+.sw?
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Local config / secrets
+.env
+.env.local
+.env.*.local
+
+# Session handoff notes — may reference API keys / paths
+docs/**/HANDOFF*.md
+docs/HANDOFF*.md
+.llcheck/
+
+# Logs
+logs/
+*.log
