@@ -164,7 +164,13 @@ pub async fn find(
     }
 }
 
+// Matches the camelCase convention shared with LyricResult above and
+// with NowPlaying in smtc.rs. Without this the field crossed into JS as
+// `time_ms`, the frontend reads `state.lines[i].timeMs` as undefined,
+// and `undefined <= pos` is always false — every line stays
+// non-active forever, no inline card ever attaches.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LyricLine {
     pub time_ms: u64,
     pub text: String,

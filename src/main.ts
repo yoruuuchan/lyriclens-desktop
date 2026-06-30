@@ -807,7 +807,15 @@ function renderLyrics() {
   state.lastLyricsHtml = nextHtml;
   container.innerHTML = nextHtml;
   const active = container.querySelector<HTMLElement>(".line.active");
-  if (active) active.scrollIntoView({ block: "center", behavior: "smooth" });
+  if (active) {
+    // The inline card renders right after the active line; if we centre
+    // the *line*, the card sits in the bottom half of the viewport and
+    // the user has to scroll. Centre the card instead when it exists —
+    // the active line lands just above, both stay visible together.
+    const sibling = active.nextElementSibling as HTMLElement | null;
+    const target = sibling?.classList.contains("analysis-card") ? sibling : active;
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
 }
 
 async function fetchLyricsFor(np: NowPlaying) {
