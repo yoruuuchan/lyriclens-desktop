@@ -18,6 +18,7 @@ import {
   type ResponseFormatMode,
   type ThinkingMode,
 } from "./analysis";
+import { readAnalysisCache, writeAnalysisCache } from "./analysis-cache";
 
 const APP_VERSION = "0.1.0";
 const FEEDBACK_URL = "https://lyriclens.yoru-and-akari.dev/feedback";
@@ -687,7 +688,12 @@ function isFallbackEligibleError(err: unknown): boolean {
 async function startAnalysisForTrack(trackKeyValue: string, lines: LyricLine[]) {
   const inputLines = toAnalysisInputLines(lines, state.settings.maxAnalysisLines);
   resetAnalysis(trackKeyValue);
-  state.analysis.settingsSignature = analysisSettingsSignature(state.settings);
+  // Capture once: state.analysis.settingsSignature can be reset out from
+  // under us if the user saves settings mid-flight (which triggers a new
+  // startAnalysisForTrack via the save handler), and we still need the
+  // original key to write cache against.
+  const signature = analysisSettingsSignature(state.settings);
+  state.analysis.settingsSignature = signature;
 
   if (!inputLines.length) {
     renderLyrics();
@@ -698,6 +704,19 @@ async function startAnalysisForTrack(trackKeyValue: string, lines: LyricLine[]) 
   if (missing) {
     state.analysis.status = "missing-config";
     state.analysis.message = missing;
+    renderLyrics();
+    return;
+  }
+
+  // Cache hit means same (track, signature) was successfully analyzed
+  // before — replay cards instantly without burning tokens. Signature
+  // includes prompt / model / mode / temperature etc., so changing any
+  // of those falls through to a real request.
+  const cached = readAnalysisCache(trackKeyValue, signature);
+  if (cached) {
+    state.analysis.status = "ready";
+    state.analysis.cards = new Map(cached.map((card) => [card.lineIndex, card]));
+    state.analysis.message = "";
     renderLyrics();
     return;
   }
@@ -713,6 +732,11 @@ async function startAnalysisForTrack(trackKeyValue: string, lines: LyricLine[]) 
 
   try {
     const cards = await requestAnalysis(state.settings, inputLines, controller.signal);
+    // Cache before the stillCurrent gate — the cards ARE correct for
+    // this (track, signature) pair regardless of whether the user has
+    // since moved to another song, and stashing them now means a
+    // back-and-forth flick will hit cache instead of re-calling the LLM.
+    writeAnalysisCache(trackKeyValue, signature, cards);
     if (!stillCurrent()) return;
     state.analysis.status = "ready";
     state.analysis.cards = new Map(cards.map((card) => [card.lineIndex, card]));
@@ -757,6 +781,11 @@ async function startAnalysisForTrack(trackKeyValue: string, lines: LyricLine[]) 
         fallbackInputLines,
         controller.signal,
       );
+      // Cache under the ORIGINAL signature, not the fallback's. If the
+      // user revisits this song with the same primary settings, we want
+      // the cards to come back instantly — re-running primary just to
+      // fail and fall back again would defeat the cache's purpose.
+      writeAnalysisCache(trackKeyValue, signature, cards);
       if (!stillCurrent()) return;
       state.analysis.status = "ready";
       state.analysis.cards = new Map(cards.map((card) => [card.lineIndex, card]));
