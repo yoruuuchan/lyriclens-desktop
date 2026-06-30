@@ -346,6 +346,7 @@ const el = {
   notebookCount: () => $("#notebook-count"),
   notebookList: () => $("#notebook-list"),
   notebookRefresh: () => $<HTMLButtonElement>("#btn-notebook-refresh"),
+  notebookBatchBar: () => $("#notebook-batch-bar"),
   // analysis cache
   cacheStats: () => $("#cache-stats"),
   cacheClear: () => $<HTMLButtonElement>("#btn-cache-clear"),
@@ -423,6 +424,10 @@ const state = {
     entries: new Map<string, NotebookEntry>(),
     loaded: false,
     lastError: "",
+    // Entry ids currently checked in the notebook tab — drives both
+    // the batch-action toolbar and the per-entry `.is-selected` class.
+    // Cleared whenever the tab closes so a re-open starts fresh.
+    selectedIds: new Set<string>(),
   },
   // The note-edit sheet floats above settings overlay; when open it
   // captures focus and Escape. entryId tracks which entry we're editing
@@ -780,14 +785,34 @@ function renderNotebookEntry(entry: NotebookEntry): string {
     typeof entry.card.startMs === "number" && entry.card.startMs >= 0
       ? formatTime(entry.card.startMs)
       : "—";
+  const selected = state.notebook.selectedIds.has(entry.id);
   const translation = entry.card.translation.trim()
     ? `<div class="notebook-entry-translation">${escapeHtml(entry.card.translation)}</div>`
     : "";
-  const note = entry.userNote.trim()
+  // The card's points + LLM note are the actual study payload. Earlier
+  // builds only rendered translation here, which made it look like the
+  // notebook had lost the vocab/grammar — they were always in the DB,
+  // just unreachable from this view.
+  const points = entry.card.points
+    .map((p) => {
+      const label = POINT_TYPE_LABELS[p.type] || POINT_TYPE_LABELS.general;
+      return `<div class="point-row">
+        <span class="point-badge ${escapeHtml(p.type)}">${escapeHtml(label)}</span>
+        <p class="point-text">${escapeHtml(p.text)}</p>
+      </div>`;
+    })
+    .join("");
+  const llmNote = entry.card.note.trim()
+    ? `<p class="notebook-entry-analysis-note">note · ${escapeHtml(entry.card.note.trim())}</p>`
+    : "";
+  const userNote = entry.userNote.trim()
     ? `<div class="notebook-entry-note">${escapeHtml(entry.userNote)}</div>`
     : `<div class="notebook-entry-note muted">尚无备注</div>`;
-  return `<article class="notebook-entry" data-entry-id="${escapeHtml(entry.id)}">
+  return `<article class="notebook-entry${selected ? " is-selected" : ""}" data-entry-id="${escapeHtml(entry.id)}">
     <header class="notebook-entry-head">
+      <label class="notebook-entry-check" title="选中">
+        <input type="checkbox" data-select-entry="${escapeHtml(entry.id)}" ${selected ? "checked" : ""} aria-label="选中这条收藏" />
+      </label>
       <div class="notebook-entry-song">
         <strong>${escapeHtml(entry.songTitle)}</strong>
         <span>${escapeHtml(entry.songArtist)}</span>
@@ -796,7 +821,9 @@ function renderNotebookEntry(entry: NotebookEntry): string {
     </header>
     <div class="notebook-entry-line">${escapeHtml(entry.lineText)}</div>
     ${translation}
-    ${note}
+    ${points ? `<div class="point-list">${points}</div>` : ""}
+    ${llmNote}
+    ${userNote}
     <footer class="notebook-entry-foot">
       <span class="notebook-entry-stamp mono">${fmtTimestamp(entry.starredAt)}</span>
       <div class="notebook-entry-actions">
@@ -815,12 +842,26 @@ function renderNotebookPanel(): void {
   if (state.notebook.lastError && total === 0) {
     countEl.textContent = "加载失败";
     listEl.innerHTML = `<p class="placeholder">读取笔记本失败 · ${escapeHtml(state.notebook.lastError)}</p>`;
+    renderNotebookBatchBar();
     return;
   }
   countEl.textContent = total === 0 ? "尚无收藏" : `共 ${total} 条`;
   if (total === 0) {
     listEl.innerHTML = `<p class="placeholder">在歌词卡片右上角点 ★ 收藏第一张。</p>`;
+    renderNotebookBatchBar();
     return;
+  }
+  // Drop selection ids that no longer exist (e.g. just got removed
+  // elsewhere) so the batch bar count stays honest.
+  for (const id of Array.from(state.notebook.selectedIds)) {
+    let stillExists = false;
+    for (const entry of state.notebook.entries.values()) {
+      if (entry.id === id) {
+        stillExists = true;
+        break;
+      }
+    }
+    if (!stillExists) state.notebook.selectedIds.delete(id);
   }
   // Sort by starredAt desc (most recent first) — the Rust list() returns
   // them already sorted, but using the in-memory map means we have to
@@ -829,6 +870,87 @@ function renderNotebookPanel(): void {
     (a, b) => b.starredAt - a.starredAt,
   );
   listEl.innerHTML = sorted.map(renderNotebookEntry).join("");
+  renderNotebookBatchBar();
+}
+
+function renderNotebookBatchBar(): void {
+  const bar = el.notebookBatchBar();
+  if (!bar) return;
+  const selectedCount = state.notebook.selectedIds.size;
+  const total = state.notebook.entries.size;
+  if (selectedCount === 0) {
+    bar.classList.remove("is-active");
+    bar.innerHTML = "";
+    return;
+  }
+  const allSelected = selectedCount === total;
+  bar.classList.add("is-active");
+  bar.innerHTML = `
+    <span class="notebook-batch-count">已选 ${selectedCount} / ${total}</span>
+    <div class="notebook-batch-actions">
+      <button type="button" id="btn-notebook-toggle-all">${allSelected ? "取消全选" : "全选"}</button>
+      <button type="button" class="danger" id="btn-notebook-delete-selected">删除选中</button>
+    </div>
+  `;
+}
+
+function toggleNotebookSelection(id: string): void {
+  if (state.notebook.selectedIds.has(id)) {
+    state.notebook.selectedIds.delete(id);
+  } else {
+    state.notebook.selectedIds.add(id);
+  }
+  renderNotebookPanel();
+}
+
+function toggleNotebookSelectAll(): void {
+  const total = state.notebook.entries.size;
+  if (state.notebook.selectedIds.size === total) {
+    state.notebook.selectedIds.clear();
+  } else {
+    state.notebook.selectedIds.clear();
+    for (const entry of state.notebook.entries.values()) {
+      state.notebook.selectedIds.add(entry.id);
+    }
+  }
+  renderNotebookPanel();
+}
+
+async function deleteSelectedNotebookEntries(): Promise<void> {
+  const ids = Array.from(state.notebook.selectedIds);
+  if (ids.length === 0) return;
+  const ok = window.confirm(
+    `确认删除 ${ids.length} 条收藏？此操作不可撤销。`,
+  );
+  if (!ok) return;
+  // Parallel removeEntry calls — each one hits a single SQLite DELETE
+  // so contention is negligible and the user-facing wait is the slowest
+  // round-trip, not the sum.
+  const results = await Promise.allSettled(ids.map((id) => removeEntry(id)));
+  let removedCount = 0;
+  for (let i = 0; i < ids.length; i++) {
+    const result = results[i];
+    if (result.status === "fulfilled" && result.value) {
+      removedCount++;
+      // Drop the entry from the in-memory map so the rerender is correct
+      // without waiting on a full reload round-trip.
+      for (const [key, entry] of state.notebook.entries.entries()) {
+        if (entry.id === ids[i]) {
+          state.notebook.entries.delete(key);
+          break;
+        }
+      }
+    }
+  }
+  state.notebook.selectedIds.clear();
+  // Lyric view reads from the same map, so refresh it too in case any
+  // of the deleted entries was on the currently-playing song.
+  state.lastLyricsHtml = "";
+  renderLyrics();
+  renderNotebookPanel();
+  if (removedCount < ids.length) {
+    console.warn(`notebook batch delete: removed ${removedCount}/${ids.length}`);
+  }
 }
 
 function updateCacheStats(): void {
@@ -1497,6 +1619,7 @@ function closeSettings() {
   // the per-session snapshot buffers so they don't grow unbounded.
   state.debugPanelOpen = false;
   state.notebookPanelOpen = false;
+  state.notebook.selectedIds.clear();
   allSessionSnapshots.clear();
   // The note-edit sheet floats above the overlay; closing settings
   // should dismiss it too so reopening doesn't surface a stale entry.
@@ -1520,7 +1643,13 @@ function switchTab(name: string) {
     // to a second waiting for the next pollSmtc tick.
     void pollSmtc();
   }
-  state.notebookPanelOpen = name === "notebook";
+  const nowOnNotebook = name === "notebook";
+  if (!nowOnNotebook && state.notebookPanelOpen) {
+    // Batch selection is transient — leaving the tab abandons it so the
+    // user comes back to a clean slate instead of stale checkboxes.
+    state.notebook.selectedIds.clear();
+  }
+  state.notebookPanelOpen = nowOnNotebook;
   if (state.notebookPanelOpen) {
     // Always refetch on tab open — entries can change from any star
     // click on the lyric side, and the cost is one SQLite query.
@@ -2040,9 +2169,21 @@ function bindSettingsForm() {
       renderNotebookPanel();
     })();
   });
+  // Checkbox change → toggle the entry's id in selectedIds. Bound on
+  // the input "change" event rather than "click" so keyboard space
+  // also flips it.
+  el.notebookList().addEventListener("change", (event) => {
+    const input = event.target as HTMLInputElement | null;
+    if (!input || input.type !== "checkbox") return;
+    const id = input.dataset.selectEntry;
+    if (id) toggleNotebookSelection(id);
+  });
   el.notebookList().addEventListener("click", (event) => {
     const target = event.target as HTMLElement | null;
     if (!target) return;
+    // Click on the checkbox itself goes through the change handler;
+    // skip the action delegation so the box doesn't double-fire.
+    if ((target as HTMLInputElement).type === "checkbox") return;
     const editId = target
       .closest<HTMLElement>("[data-edit-entry]")
       ?.dataset.editEntry;
@@ -2055,6 +2196,19 @@ function bindSettingsForm() {
       ?.dataset.removeEntry;
     if (removeId) {
       void removeNotebookEntry(removeId);
+    }
+  });
+
+  // Batch bar buttons are re-rendered every time the selection
+  // changes, so a delegated handler on the bar container survives
+  // those rewrites. Only two ids land here.
+  el.notebookBatchBar().addEventListener("click", (event) => {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    if (target.closest("#btn-notebook-toggle-all")) {
+      toggleNotebookSelectAll();
+    } else if (target.closest("#btn-notebook-delete-selected")) {
+      void deleteSelectedNotebookEntries();
     }
   });
 

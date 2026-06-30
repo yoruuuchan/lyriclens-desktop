@@ -10,6 +10,15 @@
 
 $ErrorActionPreference = "Stop"
 
+# Console codepage defaults to cp936 on zh-CN Windows, which mangles the
+# Unicode glyphs below (▸, dashes) into "鈻?"-style mojibake. Force the
+# session to UTF-8 so the step headers render. `chcp 65001` is the
+# console-host side; OutputEncoding is the .NET-side counterpart that
+# PowerShell uses when piping to native exes (npm, cargo).
+$null = & chcp 65001
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 $ProjectRoot = "D:\lyriclens-desktop"
 
 function Write-Step($message) {
