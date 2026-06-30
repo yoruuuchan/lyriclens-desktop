@@ -300,6 +300,9 @@ const el = {
   pauseFollowLabel: () => $(".pause-follow-label"),
   settingsBtn: () => $<HTMLButtonElement>("#btn-settings"),
   themeBtn: () => $<HTMLButtonElement>("#btn-theme"),
+  notebookBtn: () => $<HTMLButtonElement>("#btn-notebook"),
+  notebookOverlay: () => $("#notebook-overlay"),
+  notebookCloseBtn: () => $<HTMLButtonElement>("#btn-notebook-close"),
   overlay: () => $("#settings-overlay"),
   closeBtn: () => $<HTMLButtonElement>("#btn-settings-close"),
   cancelBtn: () => $<HTMLButtonElement>("#btn-settings-cancel"),
@@ -1628,11 +1631,34 @@ function closeSettings() {
   // Stop paying for smtc_all_sessions when nobody's looking, and drop
   // the per-session snapshot buffers so they don't grow unbounded.
   state.debugPanelOpen = false;
-  state.notebookPanelOpen = false;
-  state.notebook.selectedIds.clear();
   allSessionSnapshots.clear();
-  // The note-edit sheet floats above the overlay; closing settings
-  // should dismiss it too so reopening doesn't surface a stale entry.
+}
+
+function openNotebook() {
+  const overlay = el.notebookOverlay();
+  overlay.setAttribute("aria-hidden", "false");
+  overlay.classList.add("open");
+  state.notebookPanelOpen = true;
+  // Refetch every open — entries can change from any star click on
+  // the lyric side. Cost is one SQLite query so the refresh is cheap
+  // and we never serve a stale list.
+  void (async () => {
+    await loadNotebookEntries();
+    renderNotebookPanel();
+  })();
+}
+
+function closeNotebook() {
+  const overlay = el.notebookOverlay();
+  overlay.setAttribute("aria-hidden", "true");
+  overlay.classList.remove("open");
+  state.notebookPanelOpen = false;
+  // Batch selection is transient — closing the overlay abandons it
+  // so a reopen starts fresh instead of with stale checkboxes.
+  state.notebook.selectedIds.clear();
+  // The note-edit sheet floats above this overlay; closing the
+  // notebook should dismiss it too so reopening doesn't surface a
+  // stale entry.
   closeNoteSheet();
 }
 
@@ -1652,21 +1678,6 @@ function switchTab(name: string) {
     // Trigger an immediate fetch so the panel doesn't sit empty for up
     // to a second waiting for the next pollSmtc tick.
     void pollSmtc();
-  }
-  const nowOnNotebook = name === "notebook";
-  if (!nowOnNotebook && state.notebookPanelOpen) {
-    // Batch selection is transient — leaving the tab abandons it so the
-    // user comes back to a clean slate instead of stale checkboxes.
-    state.notebook.selectedIds.clear();
-  }
-  state.notebookPanelOpen = nowOnNotebook;
-  if (state.notebookPanelOpen) {
-    // Always refetch on tab open — entries can change from any star
-    // click on the lyric side, and the cost is one SQLite query.
-    void (async () => {
-      await loadNotebookEntries();
-      renderNotebookPanel();
-    })();
   }
   if (name === "advanced") {
     // Refresh the cache stats line every time the user comes back to
@@ -2315,6 +2326,8 @@ window.addEventListener("DOMContentLoaded", () => {
     applyTheme(next);
   });
   el.settingsBtn().addEventListener("click", openSettings);
+  el.notebookBtn().addEventListener("click", openNotebook);
+  el.notebookCloseBtn().addEventListener("click", closeNotebook);
 
   // Single delegated handler for every star button in the lyric list.
   // Re-renders bin the buttons every tick, so per-button addEventListener
