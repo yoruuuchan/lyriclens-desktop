@@ -308,14 +308,29 @@ function parseCompletionJson(content: string): unknown {
     } catch (_) {}
   }
 
-  throw new Error("API 返回内容不是可解析的 JSON。");
+  // Surface the actual prefix so the user can tell what went wrong:
+  // reasoning prose, an apology, a markdown header, a truncated JSON, etc.
+  const preview = text.replace(/\s+/g, " ").slice(0, 80);
+  throw new Error(`API 返回不是 JSON · 开头：${preview || "(空)"}`);
 }
 
 function assistantContent(responseJson: unknown): string {
+  // DeepSeek V4 / R1 sometimes only writes JSON into reasoning_content when
+  // the model "spends" its budget reasoning out loud. Prefer content; fall
+  // back to reasoning_content so the parser still has something to chew on.
   const json = responseJson as {
-    choices?: Array<{ message?: { content?: string }; text?: string }>;
+    choices?: Array<{
+      message?: { content?: string; reasoning_content?: string };
+      text?: string;
+    }>;
   };
-  return json.choices?.[0]?.message?.content ?? json.choices?.[0]?.text ?? "";
+  const choice = json.choices?.[0];
+  return (
+    choice?.message?.content ||
+    choice?.text ||
+    choice?.message?.reasoning_content ||
+    ""
+  );
 }
 
 function normalizePoints(value: unknown): AnalysisPoint[] {

@@ -12,6 +12,7 @@ import {
   requestAnalysis,
   toAnalysisInputLines,
   type AnalysisCard,
+  type AnalysisSettings,
   type CardMode,
   type KnowledgePoint,
   type ResponseFormatMode,
@@ -326,6 +327,11 @@ const state = {
   // the rule changes. Once the user types anything new the textarea
   // diverges and we leave it alone.
   lastDefaultPrompt: "",
+  // Cache of the last innerHTML written into #lyrics. pollSmtc fires
+  // every second and re-renders unconditionally; without this cache,
+  // each second wipes and rebuilds the lyric list, retriggering the
+  // analysis-card-enter animation and making cards visibly flicker.
+  lastLyricsHtml: "",
 };
 
 // ─── lyric flow ──────────────────────────────────────────────
@@ -472,20 +478,80 @@ function renderAnalysisCard(card: AnalysisCard): string {
 }
 
 function renderAnalysisSlot(lineIndex: number): string {
+  // Inline slot is now reserved for the ready state — loading / error /
+  // missing-config show up in the top status line so the user still sees
+  // them when SMTC doesn't report timeline (no active line).
   const analysis = state.analysis;
   if (!state.trackKey || analysis.trackKey !== state.trackKey) return "";
-  if (analysis.status === "loading") return renderAnalysisLoadingCard();
+  if (analysis.status !== "ready") return "";
+  const card = analysis.cards.get(lineIndex);
+  return card ? renderAnalysisCard(card) : "";
+}
+
+function renderAnalysisStatusLine(activeIdx: number, expandAll: boolean): string {
+  const analysis = state.analysis;
+  if (!state.trackKey || analysis.trackKey !== state.trackKey) return "";
+  if (analysis.status === "loading") {
+    const text = analysis.message
+      ? escapeHtml(analysis.message)
+      : "正在生成学习卡片…";
+    return `<div class="analysis-status-line loading" role="status">
+      <span class="analysis-dot" aria-hidden="true"></span>
+      <span>${text}</span>
+    </div>`;
+  }
   if (analysis.status === "missing-config") {
-    return renderAnalysisMessageCard("setup", analysis.message);
+    return `<div class="analysis-status-line setup" role="status">
+      <span class="analysis-dot" aria-hidden="true"></span>
+      <span>${escapeHtml(analysis.message)}</span>
+    </div>`;
   }
   if (analysis.status === "error") {
-    return renderAnalysisMessageCard("error", analysis.message);
+    return `<div class="analysis-status-line error" role="status">
+      <span class="analysis-dot" aria-hidden="true"></span>
+      <span>分析失败 · ${escapeHtml(analysis.message)}</span>
+    </div>`;
   }
   if (analysis.status === "ready") {
-    const card = analysis.cards.get(lineIndex);
-    return card ? renderAnalysisCard(card) : "";
+    const total = analysis.cards.size;
+    if (total === 0) {
+      return `<div class="analysis-status-line setup" role="status">
+        <span class="analysis-dot" aria-hidden="true"></span>
+        <span>模型返回为空，没生成卡片</span>
+      </div>`;
+    }
+    if (expandAll) {
+      return `<div class="analysis-status-line ready" role="status">
+        <span class="analysis-dot" aria-hidden="true"></span>
+        <span>播放器未提供 timeline · 已铺开全部 ${total} 张精选卡片</span>
+      </div>`;
+    }
+    if (activeIdx < 0 || !analysis.cards.has(activeIdx)) {
+      return `<div class="analysis-status-line ready" role="status">
+        <span class="analysis-dot" aria-hidden="true"></span>
+        <span>${total} 张卡片已就绪 · 等待播放位置</span>
+      </div>`;
+    }
+    return "";
   }
   return "";
+}
+
+function isFallbackEligibleError(err: unknown): boolean {
+  // Anything that's "we got something back but it was unusable" is worth
+  // a fallback retry: timeout, truncated JSON, empty content, etc. We
+  // deliberately do NOT fall back on auth/endpoint errors (HTTP 401/403/
+  // 404) — those would just fail the second time too.
+  const msg = (err as Error)?.message || String(err);
+  if (/HTTP 40[134]/.test(msg)) return false;
+  return (
+    msg.includes("超时") ||
+    msg.includes("不是 JSON") ||
+    msg.includes("不是可解析的 JSON") ||
+    msg.includes("内容为空") ||
+    msg.includes("不是合法 JSON") ||
+    /timeout|aborted/i.test(msg)
+  );
 }
 
 async function startAnalysisForTrack(trackKeyValue: string, lines: LyricLine[]) {
@@ -512,17 +578,66 @@ async function startAnalysisForTrack(trackKeyValue: string, lines: LyricLine[]) 
   state.analysis.controller = controller;
   renderLyrics();
 
+  const stillCurrent = () =>
+    !controller.signal.aborted && state.trackKey === trackKeyValue;
+
   try {
     const cards = await requestAnalysis(state.settings, inputLines, controller.signal);
-    if (controller.signal.aborted || state.trackKey !== trackKeyValue) return;
+    if (!stillCurrent()) return;
     state.analysis.status = "ready";
     state.analysis.cards = new Map(cards.map((card) => [card.lineIndex, card]));
     state.analysis.message = "";
   } catch (err) {
-    if (controller.signal.aborted || state.trackKey !== trackKeyValue) return;
-    state.analysis.status = "error";
-    state.analysis.message = (err as Error)?.message || String(err);
-    state.analysis.cards = new Map();
+    if (!stillCurrent()) return;
+
+    // Fallback retry: per-line mode against a long lyric easily blows
+    // past max_tokens (truncated JSON) or the 60s budget (reasoning
+    // models like DeepSeek V4/R1). Switch to "selected" mode + smaller
+    // budgets — 6-8 lines fits comfortably in 2048 tokens.
+    const canFallback =
+      isFallbackEligibleError(err) && state.settings.fallbackOnTimeout;
+
+    if (!canFallback) {
+      state.analysis.status = "error";
+      state.analysis.message = (err as Error)?.message || String(err);
+      state.analysis.cards = new Map();
+      return;
+    }
+
+    const fallbackSettings: AnalysisSettings = {
+      ...state.settings,
+      analyzeTimeoutSecs: state.settings.fallbackTimeoutSecs,
+      analyzeMaxTokens: state.settings.fallbackMaxTokens,
+      maxAnalysisLines: state.settings.fallbackMaxLines,
+      cardGenerationMode: "selected",
+    };
+    const fallbackInputLines = toAnalysisInputLines(
+      lines,
+      fallbackSettings.maxAnalysisLines,
+    );
+    const primaryReason = ((err as Error)?.message || "").includes("超时")
+      ? "超时"
+      : "输出截断 / 解析失败";
+    state.analysis.message = `首次请求${primaryReason} · 切换 selected 模式（${fallbackSettings.maxAnalysisLines} 行 / ${fallbackSettings.analyzeMaxTokens} tokens）重试…`;
+    renderLyrics();
+
+    try {
+      const cards = await requestAnalysis(
+        fallbackSettings,
+        fallbackInputLines,
+        controller.signal,
+      );
+      if (!stillCurrent()) return;
+      state.analysis.status = "ready";
+      state.analysis.cards = new Map(cards.map((card) => [card.lineIndex, card]));
+      state.analysis.message = "";
+    } catch (err2) {
+      if (!stillCurrent()) return;
+      state.analysis.status = "error";
+      const m2 = (err2 as Error)?.message || String(err2);
+      state.analysis.message = `首次 + 精简重试均失败 · ${m2}`;
+      state.analysis.cards = new Map();
+    }
   } finally {
     if (state.analysis.controller === controller) {
       state.analysis.controller = null;
@@ -533,32 +648,47 @@ async function startAnalysisForTrack(trackKeyValue: string, lines: LyricLine[]) 
 
 function renderLyrics() {
   const container = el.lyrics();
-  if (state.lyricsMessage && state.lines.length === 0) {
-    container.innerHTML = `<p class="placeholder">${escapeHtml(state.lyricsMessage)}</p>`;
-    return;
-  }
-  if (state.lines.length === 0) {
-    container.innerHTML = `<p class="placeholder">播放任意歌曲，SMTC 会自动识别。</p>`;
-    return;
-  }
   const pos = extrapolatedPositionMs(state.np);
   let activeIdx = -1;
   for (let i = 0; i < state.lines.length; i++) {
     if (state.lines[i].timeMs <= pos) activeIdx = i;
     else break;
   }
-  const html = state.lines
-    .map((line, i) => {
-      const classes = ["line"];
-      if (i === activeIdx) classes.push("active");
-      else if (i < activeIdx) classes.push("past");
-      else classes.push("future");
-      const text = line.text || "♪";
-      const card = i === activeIdx ? renderAnalysisSlot(i) : "";
-      return `<div class="${classes.join(" ")}" data-i="${i}">${escapeHtml(text)}</div>${card}`;
-    })
-    .join("");
-  container.innerHTML = html;
+  // If the player doesn't expose a timeline (NetEase / QQ desktop client
+  // are the canonical culprits), there is no active line to anchor cards
+  // to. Switch to "expand all" so the user can still read every card the
+  // model produced. We key on durationMs because positionMs=0 alone is
+  // ambiguous (could just be the intro).
+  const hasTimeline = (state.np?.durationMs ?? 0) > 0;
+  const expandAll =
+    !hasTimeline &&
+    state.analysis.status === "ready" &&
+    state.analysis.cards.size > 0;
+  const statusLine = renderAnalysisStatusLine(activeIdx, expandAll);
+  let nextHtml: string;
+  if (state.lyricsMessage && state.lines.length === 0) {
+    nextHtml = `${statusLine}<p class="placeholder">${escapeHtml(state.lyricsMessage)}</p>`;
+  } else if (state.lines.length === 0) {
+    nextHtml = `${statusLine}<p class="placeholder">播放任意歌曲，SMTC 会自动识别。</p>`;
+  } else {
+    const html = state.lines
+      .map((line, i) => {
+        const classes = ["line"];
+        if (i === activeIdx) classes.push("active");
+        else if (i < activeIdx) classes.push("past");
+        else classes.push("future");
+        const text = line.text || "♪";
+        const showCard =
+          i === activeIdx || (expandAll && state.analysis.cards.has(i));
+        const card = showCard ? renderAnalysisSlot(i) : "";
+        return `<div class="${classes.join(" ")}" data-i="${i}">${escapeHtml(text)}</div>${card}`;
+      })
+      .join("");
+    nextHtml = `${statusLine}${html}`;
+  }
+  if (nextHtml === state.lastLyricsHtml) return;
+  state.lastLyricsHtml = nextHtml;
+  container.innerHTML = nextHtml;
   const active = container.querySelector<HTMLElement>(".line.active");
   if (active) active.scrollIntoView({ block: "center", behavior: "smooth" });
 }
