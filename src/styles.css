@@ -102,6 +102,13 @@
 
 html, body, .app { height: 100%; margin: 0; padding: 0; }
 
+/* Defensive: prevent any single child (long album titles, wide LLM
+   cards) from forcing horizontal scroll when the user shrinks the
+   window. The .app grid below also forces minmax(0, 1fr) on its row
+   so children can shrink below their max-content; this is the
+   belt-and-suspenders complement. */
+html, body { overflow-x: hidden; }
+
 /* Window transparency: tauri.conf.json sets `transparent: true`, so the
    webview itself is see-through. We give the *base layer* (body / .app)
    a controllable alpha via --window-alpha. Surfaces like .now-playing,
@@ -130,6 +137,12 @@ body {
 .app {
   display: grid;
   grid-template-rows: auto 1fr auto;
+  /* Explicit minmax(0, 1fr) so the implicit column doesn't lock to
+     max-content. Without this, a long album title in .now-playing
+     .meta (white-space: nowrap) would force the grid wider than the
+     viewport — exactly the horizontal-scrollbar bug Yoru hit when
+     resizing the window down. */
+  grid-template-columns: minmax(0, 1fr);
   position: relative;
   /* Composited radial wash from the design system, layered over an
      adjustable solid-alpha base. The radial gradients themselves are
