@@ -805,29 +805,39 @@ function renderNotebookEntry(entry: NotebookEntry): string {
   const llmNote = entry.card.note.trim()
     ? `<p class="notebook-entry-analysis-note">note · ${escapeHtml(entry.card.note.trim())}</p>`
     : "";
+  // userNote: hide entirely when empty so the entry doesn't pad itself
+  // with a placeholder line that adds no info. The "加备注" footer
+  // button (label flips from "编辑" when empty) is the obvious way in.
   const userNote = entry.userNote.trim()
     ? `<div class="notebook-entry-note">${escapeHtml(entry.userNote)}</div>`
-    : `<div class="notebook-entry-note muted">尚无备注</div>`;
+    : "";
   return `<article class="notebook-entry${selected ? " is-selected" : ""}" data-entry-id="${escapeHtml(entry.id)}">
     <header class="notebook-entry-head">
       <label class="notebook-entry-check" title="选中">
         <input type="checkbox" data-select-entry="${escapeHtml(entry.id)}" ${selected ? "checked" : ""} aria-label="选中这条收藏" />
       </label>
-      <div class="notebook-entry-song">
-        <strong>${escapeHtml(entry.songTitle)}</strong>
-        <span>${escapeHtml(entry.songArtist)}</span>
+      <div class="notebook-entry-meta">
+        <span class="notebook-entry-song">
+          <span class="title">${escapeHtml(entry.songTitle)}</span>
+          <span class="sep" aria-hidden="true">·</span>
+          <span class="artist">${escapeHtml(entry.songArtist)}</span>
+        </span>
+        <span class="notebook-entry-time mono">${time}</span>
       </div>
-      <span class="notebook-entry-time mono">${time}</span>
     </header>
-    <div class="notebook-entry-line">${escapeHtml(entry.lineText)}</div>
-    ${translation}
-    ${points ? `<div class="point-list">${points}</div>` : ""}
-    ${llmNote}
-    ${userNote}
+    <div class="notebook-entry-body">
+      <div class="notebook-entry-hero">
+        <div class="notebook-entry-line">${escapeHtml(entry.lineText)}</div>
+        ${translation}
+      </div>
+      ${points ? `<div class="point-list">${points}</div>` : ""}
+      ${llmNote}
+      ${userNote}
+    </div>
     <footer class="notebook-entry-foot">
       <span class="notebook-entry-stamp mono">${fmtTimestamp(entry.starredAt)}</span>
       <div class="notebook-entry-actions">
-        <button type="button" data-edit-entry="${escapeHtml(entry.id)}">编辑备注</button>
+        <button type="button" data-edit-entry="${escapeHtml(entry.id)}">${entry.userNote.trim() ? "编辑备注" : "加备注"}</button>
         <button type="button" class="danger" data-remove-entry="${escapeHtml(entry.id)}">删除</button>
       </div>
     </footer>

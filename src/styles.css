@@ -1495,14 +1495,20 @@ button.primary:active { box-shadow: inset 2px 2px 4px rgba(0, 0, 0, 0.18); }
   gap: var(--space-3);
 }
 
+/* Layout intent: each entry reads as a learning unit. The lyric line
+   is the hero (big JP text), the translation sits right under it as
+   italic supporting text, then study payload (points / LLM note /
+   user note). Header is a thin meta strip (checkbox + song · artist +
+   time), separated from body and footer by hairline rules. */
+
 .notebook-entry {
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
   background: var(--bg-surface);
   box-shadow: var(--shadow-flat);
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
   transition: box-shadow var(--dur-fast) var(--ease-out),
               background var(--dur-fast) var(--ease-out);
 }
@@ -1511,15 +1517,15 @@ button.primary:active { box-shadow: inset 2px 2px 4px rgba(0, 0, 0, 0.18); }
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-500) 45%, transparent);
 }
 
+/* ── head: checkbox · song · time (thin meta strip) ─────────── */
 .notebook-entry-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line-1);
 }
 
-/* Native checkbox restyled to match the kp-option pattern but smaller
-   and without label text. Sits to the left of the song header. */
 .notebook-entry-check {
   display: inline-flex;
   align-items: center;
@@ -1534,9 +1540,77 @@ button.primary:active { box-shadow: inset 2px 2px 4px rgba(0, 0, 0, 0.18); }
   cursor: pointer;
 }
 
-/* The LLM-written note on a notebook entry — distinct from the user's
-   own `userNote` block below it. Reuses the lyric card phrasing
-   ("note · …") so the two views stay visually consistent. */
+.notebook-entry-meta {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.notebook-entry-song {
+  font-size: var(--text-sm);
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.notebook-entry-song .title {
+  font-weight: var(--weight-semibold);
+  color: var(--ink-1);
+}
+.notebook-entry-song .sep {
+  margin: 0 var(--space-1);
+  color: var(--ink-4);
+}
+.notebook-entry-song .artist {
+  color: var(--ink-3);
+}
+
+.notebook-entry-time {
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+
+/* ── body: hero (lyric + translation) → points → notes ──────── */
+.notebook-entry-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Lyric + translation move together as one unit; tight gap so the
+   eye reads them as "original + reading aid" rather than two lines. */
+.notebook-entry-hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.notebook-entry-line {
+  font-family: var(--font-jp);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-medium);
+  color: var(--ink-1);
+  line-height: var(--leading-snug);
+  letter-spacing: 0;
+}
+
+/* Translation: italic, plain — no inset block. Sitting flush against
+   the hero line gives it the "subtitle under main copy" feel without
+   stealing weight. */
+.notebook-entry-translation {
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+  font-style: italic;
+  line-height: var(--leading-snug);
+}
+
+/* LLM-written supplementary note ("note · …"). Italic + ink-3 keeps
+   it visually quieter than the user's own annotation below. */
 .notebook-entry-analysis-note {
   font-size: var(--text-sm);
   color: var(--ink-3);
@@ -1544,60 +1618,21 @@ button.primary:active { box-shadow: inset 2px 2px 4px rgba(0, 0, 0, 0.18); }
   line-height: var(--leading-snug);
 }
 
-.notebook-entry-song {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.notebook-entry-song strong {
-  font-size: var(--text-base);
-  color: var(--ink-1);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.notebook-entry-song span {
-  font-size: var(--text-xs);
-  color: var(--ink-3);
-}
-
-.notebook-entry-time {
-  font-size: var(--text-xs);
-  color: var(--ink-3);
-}
-
-.notebook-entry-line {
-  font-family: var(--font-jp);
-  font-size: var(--text-md);
-  color: var(--ink-1);
-  line-height: var(--leading-snug);
-}
-
-.notebook-entry-translation {
-  font-size: var(--text-sm);
-  color: var(--ink-2);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  background: var(--bg-sunken);
-  box-shadow: var(--shadow-inset);
-  line-height: var(--leading-snug);
-}
-
+/* User-written note — only rendered when non-empty. Treated as a
+   first-class annotation: light primary tint + accent rule on the
+   left so it visually stands apart from the LLM material above. */
 .notebook-entry-note {
   font-size: var(--text-sm);
-  color: var(--ink-2);
+  color: var(--ink-1);
   line-height: var(--leading-snug);
   white-space: pre-wrap;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--primary-500) 6%, transparent);
+  border-left: 2px solid var(--primary-500);
 }
 
-.notebook-entry-note.muted {
-  color: var(--ink-4);
-  font-style: italic;
-}
-
+/* ── foot: timestamp · actions ──────────────────────────────── */
 .notebook-entry-foot {
   display: flex;
   align-items: center;
@@ -1609,23 +1644,20 @@ button.primary:active { box-shadow: inset 2px 2px 4px rgba(0, 0, 0, 0.18); }
 
 .notebook-entry-stamp {
   font-size: var(--text-2xs);
-  color: var(--ink-3);
+  color: var(--ink-4);
 }
 
 .notebook-entry-actions {
   display: inline-flex;
   gap: var(--space-2);
 }
-
 .notebook-entry-actions button {
   font-size: var(--text-xs);
   padding: 4px var(--space-2);
 }
-
 .notebook-entry-actions button.danger {
   color: var(--error-500);
 }
-
 .notebook-entry-actions button.danger:hover {
   color: var(--error-700);
 }
