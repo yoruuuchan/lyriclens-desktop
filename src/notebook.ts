@@ -72,3 +72,10 @@ export async function removeEntry(id: string): Promise<boolean> {
 export async function exportEntriesJsonToPath(path: string): Promise<number> {
   return invoke<number>("notebook_export_json_to_path", { path });
 }
+
+// Anki TSV export — same shape as the JSON command above. The Rust
+// side emits Front\tBack\tTags rows; newlines inside fields are
+// rewritten to <br> for Anki HTML rendering.
+export async function exportEntriesAnkiToPath(path: string): Promise<number> {
+  return invoke<number>("notebook_export_anki_to_path", { path });
+}

@@ -26,6 +26,7 @@ import {
   writeAnalysisCache,
 } from "./analysis-cache";
 import {
+  exportEntriesAnkiToPath,
   exportEntriesJsonToPath,
   listEntries,
   makeSongKey,
@@ -351,6 +352,7 @@ const el = {
   notebookList: () => $("#notebook-list"),
   notebookRefresh: () => $<HTMLButtonElement>("#btn-notebook-refresh"),
   notebookExportJson: () => $<HTMLButtonElement>("#btn-notebook-export-json"),
+  notebookExportAnki: () => $<HTMLButtonElement>("#btn-notebook-export-anki"),
   notebookBatchBar: () => $("#notebook-batch-bar"),
   // analysis cache
   cacheStats: () => $("#cache-stats"),
@@ -968,33 +970,62 @@ async function deleteSelectedNotebookEntries(): Promise<void> {
   }
 }
 
-async function exportNotebookJson(): Promise<void> {
+type ExportFormat = "json" | "anki";
+
+const EXPORT_FORMATS: Record<
+  ExportFormat,
+  {
+    title: string;
+    ext: string;
+    filterName: string;
+    invoke: (path: string) => Promise<number>;
+  }
+> = {
+  json: {
+    title: "导出笔记本 JSON",
+    ext: "json",
+    filterName: "JSON",
+    invoke: exportEntriesJsonToPath,
+  },
+  anki: {
+    // .tsv is the right extension for tab-separated; Anki's importer
+    // accepts both .txt and .tsv but .tsv tells Yoru at a glance what
+    // it is when she looks at her downloads folder.
+    title: "导出笔记本 Anki TSV",
+    ext: "tsv",
+    filterName: "Anki TSV",
+    invoke: exportEntriesAnkiToPath,
+  },
+};
+
+async function exportNotebookAs(format: ExportFormat): Promise<void> {
+  const cfg = EXPORT_FORMATS[format];
   // YYYY-MM-DD in local time — matches what Yoru sees on the system
-  // clock when she's looking at the file picker; the schema's
-  // exportedAt field carries the precise UTC timestamp anyway, so a
-  // local-time filename here is purely a usability nudge.
+  // clock when she's looking at the file picker. For JSON the schema's
+  // exportedAt field carries the precise UTC timestamp anyway, so this
+  // is purely a usability nudge.
   const now = new Date();
   const yyyy = now.getFullYear();
   const mm = (now.getMonth() + 1).toString().padStart(2, "0");
   const dd = now.getDate().toString().padStart(2, "0");
-  const defaultName = `lyriclens-notebook-${yyyy}-${mm}-${dd}.json`;
+  const defaultName = `lyriclens-notebook-${yyyy}-${mm}-${dd}.${cfg.ext}`;
 
   let path: string | null;
   try {
     path = await saveDialog({
-      title: "导出笔记本 JSON",
+      title: cfg.title,
       defaultPath: defaultName,
-      filters: [{ name: "JSON", extensions: ["json"] }],
+      filters: [{ name: cfg.filterName, extensions: [cfg.ext] }],
     });
   } catch (err) {
-    console.warn("notebook export · save dialog failed", err);
+    console.warn(`notebook export (${format}) · save dialog failed`, err);
     showToast("打开保存对话框失败");
     return;
   }
   if (!path) return; // user cancelled
 
   try {
-    const count = await exportEntriesJsonToPath(path);
+    const count = await cfg.invoke(path);
     const basename = path.split(/[\\/]/).pop() ?? path;
     showToast(`已导出 ${count} 条 · ${basename}`);
   } catch (err) {
@@ -1002,7 +1033,7 @@ async function exportNotebookJson(): Promise<void> {
       typeof err === "object" && err && "message" in err
         ? (err as { message?: string }).message ?? String(err)
         : String(err);
-    console.warn("notebook export failed", err);
+    console.warn(`notebook export (${format}) failed`, err);
     showToast(`导出失败 · ${msg}`);
   }
 }
@@ -2239,7 +2270,10 @@ function bindSettingsForm() {
     })();
   });
   el.notebookExportJson().addEventListener("click", () => {
-    void exportNotebookJson();
+    void exportNotebookAs("json");
+  });
+  el.notebookExportAnki().addEventListener("click", () => {
+    void exportNotebookAs("anki");
   });
   // Checkbox change → toggle the entry's id in selectedIds. Bound on
   // the input "change" event rather than "click" so keyboard space

@@ -278,6 +278,113 @@ pub fn export_to_path(conn: &Connection, path: &Path) -> Result<usize, NotebookE
     Ok(count)
 }
 
+// Anki TSV export — schema doc §"Anki CSV 导出" locks the layout:
+// Front\tBack\tTags, one row per entry. Field-internal \n becomes <br>
+// (Anki renders HTML) and \t becomes a single space so it can't break
+// the column count. Tags drop whitespace and the songKey delimiter `|`
+// to underscores, since Anki splits tags on whitespace.
+
+const POINT_LABELS: &[(&str, &str)] = &[
+    ("vocabulary", "词汇"),
+    ("grammar", "语法"),
+    ("culture", "文化背景"),
+    ("pronunciation", "发音"),
+    ("tone", "语感"),
+    ("general", "补充"),
+];
+
+fn label_of(kind: &str) -> &'static str {
+    POINT_LABELS
+        .iter()
+        .find(|(k, _)| *k == kind)
+        .map(|(_, label)| *label)
+        .unwrap_or("其他")
+}
+
+fn sanitize_anki_field(s: &str) -> String {
+    s.replace('\t', " ").replace('\n', "<br>")
+}
+
+fn sanitize_tag_song_key(song_key: &str) -> String {
+    // Anki splits tags on whitespace and treats `|` specially in
+    // search; replacing both with `_` keeps the tag a single token
+    // that still echoes the original key for human searching.
+    song_key.replace(['|', ' '], "_")
+}
+
+fn anki_row_for(entry: &NotebookEntry) -> String {
+    let front = format!(
+        "{} — {}\n{}",
+        entry.song_title.trim(),
+        entry.song_artist.trim(),
+        entry.line_text.trim(),
+    );
+
+    // Each section is one paragraph; sections are joined by a blank
+    // line (\n\n). Empty sections drop out so the Back never carries a
+    // stray "---" or trailing blank.
+    let mut sections: Vec<String> = Vec::new();
+    let translation = entry.card.translation.trim();
+    if !translation.is_empty() {
+        sections.push(translation.to_string());
+    }
+    if !entry.card.points.is_empty() {
+        let points_block = entry
+            .card
+            .points
+            .iter()
+            .map(|p| format!("{}: {}", label_of(&p.kind), p.text.trim()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        sections.push(points_block);
+    }
+    let card_note = entry.card.note.trim();
+    if !card_note.is_empty() {
+        sections.push(card_note.to_string());
+    }
+    let user_note = entry.user_note.trim();
+    if !user_note.is_empty() {
+        // "---" on its own line keeps the user's note visually separated
+        // from the LLM-generated material above it.
+        sections.push(format!("---\n{user_note}"));
+    }
+    let back = sections.join("\n\n");
+
+    let source_str = match entry.source {
+        EntrySource::Plugin => "plugin",
+        EntrySource::Desktop => "desktop",
+    };
+    let tags = format!(
+        "lyriclens song:{} source:{}",
+        sanitize_tag_song_key(&entry.song_key),
+        source_str,
+    );
+
+    format!(
+        "{}\t{}\t{}",
+        sanitize_anki_field(&front),
+        sanitize_anki_field(&back),
+        tags,
+    )
+}
+
+pub fn build_anki_tsv(conn: &Connection) -> Result<(String, usize), NotebookError> {
+    let entries = list(conn)?;
+    let count = entries.len();
+    let mut tsv = String::new();
+    for entry in &entries {
+        tsv.push_str(&anki_row_for(entry));
+        tsv.push('\n');
+    }
+    Ok((tsv, count))
+}
+
+pub fn export_anki_to_path(conn: &Connection, path: &Path) -> Result<usize, NotebookError> {
+    let (tsv, count) = build_anki_tsv(conn)?;
+    std::fs::write(path, tsv)?;
+    Ok(count)
+}
+
 fn get_by_business_key(
     conn: &Connection,
     song_key: &str,
@@ -535,6 +642,108 @@ mod tests {
         let entries = payload["entries"].as_array().unwrap();
         let back: NotebookEntry = serde_json::from_value(entries[0].clone()).unwrap();
         assert_eq!(back.user_note, "line1\n\"quoted\"\ttab後の文字");
+    }
+
+    #[test]
+    fn anki_row_has_three_tab_columns_and_expected_front() {
+        let conn = fresh_db();
+        let entry = sample_entry(
+            "11111111-1111-4111-8111-111111111111",
+            "brave shine|aimer|234",
+            7,
+        );
+        upsert(&conn, &entry).unwrap();
+
+        let (tsv, count) = build_anki_tsv(&conn).unwrap();
+        assert_eq!(count, 1);
+        // Trailing newline → split lossless across rows.
+        let lines: Vec<&str> = tsv.trim_end_matches('\n').split('\n').collect();
+        assert_eq!(lines.len(), 1);
+
+        let cols: Vec<&str> = lines[0].split('\t').collect();
+        assert_eq!(cols.len(), 3, "Front\\tBack\\tTags");
+        assert_eq!(
+            cols[0], "Brave Shine — Aimer<br>強く眩しい光が",
+            "Front carries title — artist<br>lineText after \\n→<br> rewrite",
+        );
+        assert!(
+            cols[1].starts_with("强烈而耀眼的光<br><br>词汇: 眩しい: 耀眼的"),
+            "Back leads with translation, then blank line, then label-prefixed point: {}",
+            cols[1],
+        );
+        assert!(
+            cols[1].ends_with("<br><br>---<br>first star"),
+            "Back ends with the user note section after the --- divider: {}",
+            cols[1],
+        );
+        assert_eq!(
+            cols[2], "lyriclens song:brave_shine_aimer_234 source:desktop",
+            "Tags column: songKey | and spaces folded to _, source intact",
+        );
+    }
+
+    #[test]
+    fn anki_label_falls_back_for_unknown_point_kinds() {
+        // Unknown point kind shouldn't blow up the export — we want a
+        // best-effort label so a future v2 schema with new kinds still
+        // produces usable CSV from a v1-trained client.
+        assert_eq!(label_of("vocabulary"), "词汇");
+        assert_eq!(label_of("grammar"), "语法");
+        assert_eq!(label_of("culture"), "文化背景");
+        assert_eq!(label_of("pronunciation"), "发音");
+        assert_eq!(label_of("tone"), "语感");
+        assert_eq!(label_of("general"), "补充");
+        assert_eq!(label_of("nonsense"), "其他");
+    }
+
+    #[test]
+    fn anki_row_sanitizes_tabs_and_newlines_in_fields() {
+        let conn = fresh_db();
+        let mut entry = sample_entry(
+            "11111111-1111-4111-8111-111111111111",
+            "song|artist|200",
+            0,
+        );
+        // A userNote with a real \t and \n must not break the column
+        // count or row count.
+        entry.user_note = "tab\there\nnew line".into();
+        upsert(&conn, &entry).unwrap();
+
+        let (tsv, _) = build_anki_tsv(&conn).unwrap();
+        let rows: Vec<&str> = tsv.trim_end_matches('\n').split('\n').collect();
+        assert_eq!(rows.len(), 1, "internal \\n must not split rows");
+        let cols: Vec<&str> = rows[0].split('\t').collect();
+        assert_eq!(cols.len(), 3, "internal \\t must not split columns");
+        assert!(cols[1].contains("tab here"), "tab → space in field");
+        assert!(
+            cols[1].contains("here<br>new line"),
+            "newline → <br> in field, but the literal 'new line' space stays: {}",
+            cols[1],
+        );
+    }
+
+    #[test]
+    fn anki_back_omits_empty_sections_cleanly() {
+        // No points, no card.note, no userNote — Back should be the
+        // translation only with no stray blank lines or `---`.
+        let conn = fresh_db();
+        let mut entry = sample_entry(
+            "11111111-1111-4111-8111-111111111111",
+            "song|artist|200",
+            0,
+        );
+        entry.card.points.clear();
+        entry.card.note = "".into();
+        entry.user_note = "".into();
+        upsert(&conn, &entry).unwrap();
+
+        let (tsv, _) = build_anki_tsv(&conn).unwrap();
+        let cols: Vec<&str> = tsv.trim_end_matches('\n').split('\t').collect();
+        assert_eq!(cols[1], "强烈而耀眼的光");
+        assert!(
+            !cols[1].contains("---"),
+            "no divider when userNote is empty"
+        );
     }
 
     #[test]
