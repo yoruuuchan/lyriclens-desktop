@@ -599,6 +599,38 @@ button.icon.close-btn:active {
   letter-spacing: var(--tracking-wide);
 }
 
+/* Pause-follow toggle. While the song keeps playing, the lyric view
+   stays frozen on the current card so the user can study it without
+   chasing scroll. */
+.ll-pause-follow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-left: var(--space-2);
+  padding-right: var(--space-3);
+}
+.ll-pause-follow svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2;
+}
+.ll-pause-follow .resume-icon { display: none; }
+.ll-pause-follow[aria-pressed="true"] .pause-icon { display: none; }
+.ll-pause-follow[aria-pressed="true"] .resume-icon { display: inline-block; }
+.ll-pause-follow[aria-pressed="true"] {
+  color: var(--warning-500);
+  background: color-mix(in srgb, var(--warning-500) 12%, var(--bg-surface));
+}
+.ll-pause-follow[aria-pressed="true"]:hover {
+  background: color-mix(in srgb, var(--warning-500) 18%, var(--bg-surface));
+  color: var(--warning-500);
+}
+
+/* When the view is frozen, dim the future-line stack a touch so it's
+   clearer that scroll isn't going to catch up — the user is "off the
+   train" on purpose. */
+.lyrics.is-paused .line.future { opacity: 0.55; }
+
 /* ═══ settings overlay ═══════════════════════════════════════ */
 
 .settings-overlay {
