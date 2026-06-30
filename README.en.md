@@ -2,7 +2,7 @@
 
 [中文](README.md) · [English](README.en.md)
 
-A standalone desktop companion that surfaces lyrics with LLM-powered learning notes — without depending on any specific music player.
+A standalone desktop companion that surfaces lyrics with LLM-powered learning notes. It reads the current track from Windows SMTC, pulls the synced lyrics from LRCLIB, and asks an LLM for learning cards inline — **tiered by how healthy each player's timeline actually is**, not by player name. Players whose position genuinely advances (Spotify Desktop, Media Player, NetEase Cloud Music, QQ Music, Apple Music, …) get per-line sync; players that only publish metadata (foobar2000 in default config, etc.) automatically fall back to fan-out cards. The classification is driven by observed snapshots, so the support tier follows reality instead of a hard-coded allowlist.
 
 ## Status
 
@@ -26,7 +26,9 @@ The two hosts are independent complete products. If BetterNCM dies, the desktop 
 
 ## What's in the box right now
 
-- **SMTC reader** — Title / artist / album / duration / position / playback status pulled via `windows-rs` `Media_Control`. Polled every 1s; the frontend extrapolates position between polls for smooth lyric highlight.
+- **SMTC reader** — Title / artist / album / duration / position / playback status / `LastUpdatedTime` / `PlaybackRate` / `SourceAppUserModelId`, pulled via `windows-rs` `Media_Control`. Polled every 1s; the frontend extrapolates position between polls for smooth lyric highlight.
+- **Timeline health classification** — Each SMTC session runs through a 6-tier state machine: `timeline_healthy` / `timeline_candidate` → per-line sync; `timeline_unstable` → per-line with warning; `metadata_only` / `timeline_dead` → fan all cards out automatically. The decision is driven by whether position actually advances at the expected rate over a ≥3-frame window, not by an allowlist of player names.
+- **Debug panel** — Settings → 调试 tab shows the current session plus every sibling SMTC session with raw fields (position / duration / lastUpdated / capturedAt / playbackRate) and a colored health badge. One screenshot when something goes wrong is enough to triage.
 - **LRCLIB client** — `/api/get` with `/api/search` fallback, ±5s duration tolerance, LRC parser handles multi-stamp lines. (Probe E measured 97.9% hit rate across 290 songs in 8 categories — see the plugin repo's roadmap for the benchmark.)
 - **Sync-scrolling lyric pane** — Active line highlighted in primary blue, faded past/future lines, smooth scroll-into-view.
 - **LLM analysis pipeline** — Reuses the plugin prompt frame / typed-points schema, calls an OpenAI-compatible Chat Completions endpoint, parses JSON, and renders the learning card below the active lyric line.
@@ -41,10 +43,12 @@ The two hosts are independent complete products. If BetterNCM dies, the desktop 
 ## What's not in the MVP yet
 
 - ⏳ Real-provider validation: enter endpoint / key / model and confirm request, parsing, and inline card render all work end to end.
-- ⏳ Favorites / SQLite store (scaffolded but empty)
-- ⏳ Cross-host JSON import/export
-- ⏳ Vocab CDN, JLPT tagging, word-frequency stats
-- ⏳ macOS (MRMediaRemote) / Linux (MPRIS) — Windows-first
+- ⏳ Favorites / `NotebookEntry` SQLite store (scaffolded but empty)
+- ⏳ Cross-host JSON import/export (schema is locked in the parent repo's [`docs/schema/notebook-entry.md`](https://github.com/yoruuuchan/LyricLens/blob/main/docs/schema/notebook-entry.md))
+- ⏳ Vocab CDN, JLPT / CEFR-J level tags
+- ⏳ Per-line card request batching (work around the 4096-token truncation)
+
+> Windows-only. macOS / Linux were dropped from the roadmap on purpose; see the parent repo's long-term direction decisions.
 
 ## Development
 

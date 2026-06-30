@@ -2,7 +2,7 @@
 
 [中文](README.md) · [English](README.en.md)
 
-脱离播放器的 AI 歌词学习窗。Spotify / QQ 音乐 / foobar2000 / Edge 浏览器，凡是把播放信息发给 Windows SMTC 的，它都能识别歌曲、拉 LRCLIB 同步歌词、用 LLM 现场生成学习卡片——不依赖任何特定播放器。
+脱离播放器的 AI 歌词学习窗。识别 Windows SMTC 当前播放的歌曲、拉 LRCLIB 同步歌词、用 LLM 现场生成学习卡片，**按播放器实际暴露的 timeline 健康度分级**：position 真在涨的播放器（Spotify 桌面版 / Media Player / 网易云 / QQ 音乐 / Apple Music 等）走逐行同步；只给元数据不给 timeline 的（foobar2000 默认配置等）自动降级成铺开式卡片。不依赖任何特定播放器，也不依赖播放器名单——一切看真机数据。
 
 ## 当前状态
 
@@ -28,7 +28,9 @@ LyricLens 是「一个产品，两个 host」，本仓库是 **host 2**（桌面
 
 ## 已经能跑的部分
 
-- **SMTC 读取** — title / artist / album / duration / position / 播放状态，通过 `windows-rs` 的 `Media_Control` feature 拉取。每秒轮询，前端在两次轮询之间做位置外推，高亮平滑滚动
+- **SMTC 读取** — title / artist / album / duration / position / 播放状态 / `LastUpdatedTime` / `PlaybackRate` / `SourceAppUserModelId`，通过 `windows-rs` 的 `Media_Control` feature 拉取。每秒轮询，前端在两次轮询之间做位置外推，高亮平滑滚动
+- **Timeline 健康度分级** — 每个 SMTC session 跑 6 档状态机分类：`timeline_healthy` / `timeline_candidate` → 逐行同步；`timeline_unstable` → 逐行 + 警告；`metadata_only` / `timeline_dead` → 自动铺开全部学习卡片。判定基于 position 实际变化（≥3 帧窗口，看涨幅是否符合播放速率），不绑死播放器名单
+- **调试面板** — 设置 → 调试 tab 显示当前会话 + 所有 SMTC sibling 会话的原始字段（position / duration / lastUpdated / capturedAt / playbackRate）+ 彩色 health 徽章。出问题截一张图就能秒判病因
 - **LRCLIB 客户端** — `/api/get` + `/api/search` fallback，时长 ±5s 容差，LRC 解析支持多时间戳行。（探针 E 在 290 首歌 8 类别上实测命中率 97.9%，详见插件仓库 roadmap）
 - **同步滚动歌词面板** — 当前行 primary blue 高亮、前后行渐隐、平滑居中滚动
 - **LLM 分析管线** — 复用插件端 prompt frame / typed points schema，调用 OpenAI 兼容 Chat Completions，解析 JSON 后把学习卡片显示在当前歌词行下方
@@ -43,10 +45,12 @@ LyricLens 是「一个产品，两个 host」，本仓库是 **host 2**（桌面
 ## MVP 还差什么
 
 - ⏳ 真实 provider 验收：填 endpoint / key / model，确认请求、解析、inline 卡片显示都跑通
-- ⏳ 收藏 / SQLite 存储（脚手架在但空着）
-- ⏳ 跨 host JSON 导入/导出
-- ⏳ 词库 CDN、JLPT 等级标签、词频统计
-- ⏳ macOS（MRMediaRemote）/ Linux（MPRIS）支持——目前 Windows 优先
+- ⏳ 收藏 / `NotebookEntry` SQLite 存储（脚手架在但空着）
+- ⏳ 跨 host JSON 导入/导出（schema 已在主仓库 [`docs/schema/notebook-entry.md`](https://github.com/yoruuuchan/LyricLens/blob/main/docs/schema/notebook-entry.md) 落定）
+- ⏳ 词库 CDN、JLPT / CEFR-J 等级标签
+- ⏳ per-line 卡片分批请求（避开 4096 max_tokens 截断）
+
+> Windows-only。macOS / Linux 已经在长期方向里明示砍掉，不在 roadmap 内。
 
 ## 开发
 
