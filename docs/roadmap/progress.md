@@ -13,6 +13,57 @@ tags: `[plan]` route decision / `[ship]` shipped functionality / `[probe]` probe
 
 ---
 
+## 2026-07-01 [ship] 阶段 3 第 0 步 + 国内连接根治 + ninelie 烂源修复
+
+桌面版一夜 6 条 PR 全 merged。阶段 3 主菜的"第 0 步 cache"做完，国内连不上 lrclib.net 的老问题用 Cloudflare Worker 反代根治了，发现并修了 ninelie 那条暴露的 LRCLIB 候选排序 + plain-only 时间轴回落 bug。
+
+PR 列表（时间序）：
+
+- **[#8](https://github.com/yoruuuchan/lyriclens-desktop/pull/8) feat(analysis): cache LLM cards by (trackKey, signature)**
+  - localStorage FIFO（上限 50），key = `${trackKey}|${analysisSignature}`，存 raw cards JSON
+  - `startAnalysisForTrack` 入口先查 cache，命中跳过 LLM；primary / fallback 都写 cache（都用原 signature）
+  - signature 抽到局部，防止保存设置中途 `state.analysis.settingsSignature` 被重置导致写入错位
+  - 卡片右上角徽章 cache 命中时变 `cached`（primary tint），无需 DevTools 可视化验证
+
+- **[#9](https://github.com/yoruuuchan/lyriclens-desktop/pull/9) fix(analysis): force Simplified Chinese when target is bare 中文**
+  - 真机验收第一轮发现输出全是繁体（甜點 / 終點），原因是裸 "中文" 对模型歧义，日→中翻译偏繁体
+  - `buildDefaultFocus` 中加 `clarifyTargetLanguage`，裸 `中文` / `chinese` → `简体中文 (Simplified Chinese)`
+  - `DEFAULT_SETTINGS.targetLanguage` 改 `简体中文`；UI placeholder 同步
+  - 用户显式输入 `繁体中文` 走原值，不强制
+
+- **[#10](https://github.com/yoruuuchan/lyriclens-desktop/pull/10) fix(lrclib): retry transient errors + friendly Chinese messages**
+  - reqwest transport 错误（timeout / connect）现在重试 1 次，500ms 退避
+  - `LrcError` 扩 Timeout / Connect 变体；`CmdError` 跟着扩 kind=`timeout`/`connect`/`http_status`
+  - frontend `describeLyricFetchError` 集中翻译错误：网络拦截、超时、5xx 各自有人话提示，不再泄露 reqwest 英文 debug
+
+- **[#11](https://github.com/yoruuuchan/lyriclens-desktop/pull/11) feat(lrclib): route through Cloudflare Worker reverse-proxy**
+  - 根治 GFW 抽 lrclib.net 的问题
+  - 新 Worker `lrclib-proxy` 部署到 `lrclib.yoru-and-akari.dev`：CF edge 终止 TLS，server-to-server 从 CF backbone 走 lrclib.net；6h edge cache for 200，no-store for 404/5xx
+  - `cloudflare-worker/` 加 worker.js + wrangler.toml + deploy.sh（直接 API 上传，跟插件 worker 同款）
+  - 部署期间同步建好 AAAA DNS + Worker route + 冒烟测试（ninelie 通过代理可达）
+  - `BASE_URL` 切换到代理域名
+
+- **[#12](https://github.com/yoruuuchan/lyriclens-desktop/pull/12) chore(dev): add scripts/dev.ps1 + desktop shortcut**
+  - 把 handoff 里的"杀 1420 端口 / kill 老进程 / npm run tauri dev"三件套打包
+  - 桌面 `LyricLens Dev.lnk` 已建好，图标 src-tauri/icons/icon.ico，TargetPath powershell.exe + `-NoExit`
+
+- **[#13](https://github.com/yoruuuchan/lyriclens-desktop/pull/13) fix(lrclib): prefer synced candidates + survive plain-only fallback**
+  - ninelie 卡死在 `(End)` 卡片的真凶：Rust `search()` 按 duration 选了一个 id=7399611（dur=261 精确但 syncedLyrics 空字符串，plain 最后一行是字面 "(End)"），前端 plain-only 时所有 timeMs=0 → activeIdx 永远停最后行
+  - Rust：`search()` 排序改成两层，有 synced 优先，同层按 duration 距离
+  - Frontend：`renderLyrics` 加 `lyricsHaveTimeline = state.lines.some(timeMs > 0)`，没时间轴时 activeIdx=-1 + 进 expandAll 桶
+  - Cache：`CACHE_VERSION` 1→2 让旧 (End) cards 不可达
+
+真机重大发现：
+- **网易云 Win32 桌面版 + Apple Music Windows = `timeline_healthy`**（前面 session5 已确认），ninelie 是 LRCLIB 端候选排序问题，不是 SMTC
+- LRCLIB `/api/search` 对 "Aimer / EGOIST" 这种带 " / " 的 artist 返回大量候选，duration 排序时 plain-only 行容易压过 synced 行——这是一个一般性问题，不只 ninelie
+
+下一站：
+- 阶段 3 第 1 步：**NotebookEntry SQLite + tauri-plugin-sql**（半天到一天）。schema 已在 `D:\LyricLens\docs\schema\notebook-entry.md` 锁定。Cache（第 0 步）做完后开发体验已经不被反复 LLM 调用打断
+- 第 2-4 步：star button / Anki 导出 / JSON import-export（每条半天）
+- 词库基建（可并行）：Bluskyo JLPT KV 部署 + Rust client + badge UI
+
+详细交接看 `HANDOFF-2026-06-30-session2.md`。
+
 ## 2026-06-30 [probe] JLPT 词表调研落地 — Bluskyo + Tanos CC BY
 
 JLPT 词表 license 调研报告回来（GPT 产出，`C:\Users\15877\Downloads\lyriclens_jlpt_vocab_research.md`）。决策落定在插件版 roadmap，桌面版按 schema 实现。
