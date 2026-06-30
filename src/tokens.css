@@ -1,0 +1,383 @@
+/* ============================================================
+   yoru-and-akari Console — Colors & Type
+   ------------------------------------------------------------
+   Two themes, two halves of a daily rhythm:
+     akari (灯) — light: cool porcelain + calm royal blue
+     yoru  (夜) — dark : deep midnight indigo + lifted indigo
+
+   Mobile-first, compact UI. Soft neumorphism (dual tinted
+   shadows) + subtle liquid glass on translucent surfaces.
+   ============================================================ */
+
+/* ---------- Font faces -------------------------------------- */
+/* Geist + Geist Mono come from Google Fonts. Zen Kaku Gothic
+   New is used for occasional Japanese moments and accent
+   labels. All are licensed for embedding. */
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap");
+
+/* ---------- Family stacks ----------------------------------- */
+:root {
+  --font-ui:      "Geist", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono:    "Geist Mono", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-jp:      "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", system-ui, sans-serif;
+
+  /* Type scale — compact, console-grade.
+     base = 13px; nothing smaller than 11px on screen. */
+  --text-2xs:  10px;
+  --text-xs:   11px;
+  --text-sm:   12px;
+  --text-base: 13px;
+  --text-md:   14px;
+  --text-lg:   16px;
+  --text-xl:   19px;
+  --text-2xl:  23px;
+  --text-3xl:  28px;
+  --text-4xl:  34px;
+  --text-5xl:  44px;
+
+  --leading-tight:   1.2;
+  --leading-snug:    1.35;
+  --leading-normal:  1.5;
+  --leading-relaxed: 1.7;
+
+  --tracking-tight:   -0.012em;
+  --tracking-normal:   0;
+  --tracking-wide:    0.04em;
+  --tracking-caps:    0.08em;
+
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* Spacing — 4px base. */
+  --space-0:  0px;
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-7:  28px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+
+  /* Radii. Inset controls feel softer at lg+. */
+  --radius-xs: 6px;
+  --radius-sm: 9px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-2xl: 28px;
+  --radius-pill: 999px;
+
+  /* Touch targets — minimum 44px for mobile. */
+  --hit-min: 44px;
+
+  /* Motion */
+  --ease-out:    cubic-bezier(0.22, 1, 0.36, 1); /* @kind other */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1); /* @kind other */
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.42, 1); /* @kind other */
+  --dur-fast:    140ms; /* @kind other */
+  --dur-base:    220ms; /* @kind other */
+  --dur-slow:    420ms; /* @kind other */
+}
+
+/* ============================================================
+   AKARI (light) — default
+   ============================================================ */
+:root,
+[data-theme="akari"] {
+  /* Surfaces — cool porcelain, slightly bluish */
+  --bg-base:      #E8ECF3; /* page */
+  --bg-surface:   #EFF2F8; /* card/raised */
+  --bg-elevated:  #F6F8FC; /* tooltips, popovers */
+  --bg-sunken:    #DEE3EC; /* recessed inputs */
+  --bg-tint:      #F1F4FB; /* hover surface */
+
+  /* Glass (akari) — frosted porcelain */
+  --glass-bg:     hsla(220, 30%, 98%, 0.62);
+  --glass-border: hsla(225, 30%, 55%, 0.18);
+  --glass-blur:   18px;
+  --glass-sat:    140%;
+
+  /* Ink */
+  --ink-1: #0E1525; /* primary */
+  --ink-2: #394560; /* secondary */
+  --ink-3: #6B7793; /* tertiary, captions */
+  --ink-4: #A1ABBF; /* disabled, hairline labels */
+  --ink-on-primary: #FFFFFF;
+
+  /* Hairlines */
+  --line-1: rgba(14, 21, 37, 0.06);
+  --line-2: rgba(14, 21, 37, 0.10);
+  --line-strong: rgba(14, 21, 37, 0.18);
+
+  /* Primary — calm royal blue */
+  --primary-50:  #EEF2FF;
+  --primary-100: #DCE3FE;
+  --primary-200: #B9C6FD;
+  --primary-300: #92A8FB;
+  --primary-400: #6E89F2;
+  --primary-500: #4F6CE8; /* base */
+  --primary-600: #3D58D4;
+  --primary-700: #2E44B0;
+  --primary-800: #233587;
+  --primary-900: #182763;
+
+  /* Accent — ember orange (used sparingly) */
+  --ember-100: #FFE4D6;
+  --ember-300: #FF9456;
+  --ember-500: #F06A20;
+  --ember-700: #C05015;
+
+  /* Accent — frost cyan (cool complement) */
+  --frost-100: #DBF2F0;
+  --frost-300: #68C8C2;
+  --frost-500: #1EA8A0;
+  --frost-700: #188078;
+
+  /* Semantic */
+  --success-100: #DCF3E8;
+  --success-500: #2BA672;
+  --success-700: #1F7E58;
+
+  --warning-100: #FBEAC9;
+  --warning-500: #D89A3A;
+  --warning-700: #A57427;
+
+  --error-100: #FADBDB;
+  --error-500: #D45D5D;
+  --error-700: #A23F3F;
+
+  --info-100: #DCE3FE;
+  --info-500: #4F6CE8;
+  --info-700: #2E44B0;
+
+  /* Neumorphism shadow stops — tinted, never pure black */
+  --neo-hi:      rgba(255, 255, 255, 0.95);
+  --neo-lo:      rgba(143, 158, 191, 0.45);
+  --neo-lo-soft: rgba(143, 158, 191, 0.28);
+
+  /* Composed shadows */
+  --shadow-flat:    0 1px 0 rgba(255,255,255,0.6) inset, 0 1px 2px rgba(14,21,37,0.04);
+  --shadow-raised:  -4px -4px 12px var(--neo-hi), 4px 4px 14px var(--neo-lo-soft);
+  --shadow-lifted: -6px -6px 18px var(--neo-hi), 8px 8px 22px var(--neo-lo);
+  --shadow-pop:    0 10px 30px -8px rgba(20, 28, 51, 0.22), 0 2px 6px rgba(20,28,51,0.06);
+  --shadow-inset:  inset 3px 3px 6px var(--neo-lo-soft), inset -3px -3px 6px var(--neo-hi);
+  --shadow-inset-deep: inset 4px 4px 8px var(--neo-lo), inset -3px -3px 6px var(--neo-hi);
+  --shadow-focus:  0 0 0 3px rgba(79, 108, 232, 0.28);
+
+  /* Page background — subtle radial wash, like a desk lamp */
+  --page-wash:
+    radial-gradient(120% 80% at 80% -10%, rgba(79, 108, 232, 0.07), transparent 60%),
+    radial-gradient(90% 70% at 0% 100%, rgba(240, 106, 32, 0.05), transparent 55%),
+    var(--bg-base);
+}
+
+/* ============================================================
+   YORU (dark)
+   ============================================================ */
+[data-theme="yoru"] {
+  --bg-base:      #0B1020;
+  --bg-surface:   #131A2E;
+  --bg-elevated:  #1B2340;
+  --bg-sunken:    #080D1B;
+  --bg-tint:      #182146;
+
+  --glass-bg:     hsla(225, 35%, 14%, 0.62);
+  --glass-border: hsla(220, 40%, 70%, 0.10);
+  --glass-blur:   20px;
+  --glass-sat:    130%;
+
+  --ink-1: #E6EAF6;
+  --ink-2: #A8B2CC;
+  --ink-3: #6B7691;
+  --ink-4: #434D67;
+  --ink-on-primary: #0B1020;
+
+  --line-1: rgba(255, 255, 255, 0.06);
+  --line-2: rgba(255, 255, 255, 0.10);
+  --line-strong: rgba(255, 255, 255, 0.18);
+
+  --primary-50:  #1A2245;
+  --primary-100: #1F2A55;
+  --primary-200: #2A3878;
+  --primary-300: #3D52AE;
+  --primary-400: #5C76DE;
+  --primary-500: #7A95FA; /* lifted indigo */
+  --primary-600: #93A9FB;
+  --primary-700: #B4C3FC;
+  --primary-800: #D6DEFD;
+  --primary-900: #ECF0FE;
+
+  --ember-100: #2A1408;
+  --ember-300: #804418;
+  --ember-500: #F07830;
+  --ember-700: #FF9456;
+
+  --frost-100: #0A2624;
+  --frost-300: #186060;
+  --frost-500: #38C8C0;
+  --frost-700: #78E0D8;
+
+  --success-100: #143025;
+  --success-500: #3FCB94;
+  --success-700: #7CE0B6;
+
+  --warning-100: #3A2E14;
+  --warning-500: #ECB85F;
+  --warning-700: #F4D193;
+
+  --error-100: #3A1A1A;
+  --error-500: #F08484;
+  --error-700: #F5B0B0;
+
+  --info-100: #1F2A55;
+  --info-500: #7A95FA;
+  --info-700: #B4C3FC;
+
+  --neo-hi:      rgba(255, 255, 255, 0.05);
+  --neo-lo:      rgba(0, 0, 0, 0.55);
+  --neo-lo-soft: rgba(0, 0, 0, 0.35);
+
+  --shadow-flat:    0 1px 0 rgba(255,255,255,0.04) inset, 0 1px 2px rgba(0,0,0,0.35);
+  --shadow-raised:  -3px -3px 10px var(--neo-hi), 5px 5px 16px var(--neo-lo-soft);
+  --shadow-lifted: -4px -4px 14px var(--neo-hi), 8px 8px 24px var(--neo-lo);
+  --shadow-pop:    0 14px 36px -10px rgba(0,0,0,0.6), 0 2px 6px rgba(0,0,0,0.4);
+  --shadow-inset:  inset 3px 3px 7px var(--neo-lo-soft), inset -2px -2px 5px var(--neo-hi);
+  --shadow-inset-deep: inset 4px 4px 9px var(--neo-lo), inset -2px -2px 6px var(--neo-hi);
+  --shadow-focus:  0 0 0 3px rgba(122, 149, 250, 0.35);
+
+  --page-wash:
+    radial-gradient(120% 80% at 80% -10%, rgba(122, 149, 250, 0.10), transparent 60%),
+    radial-gradient(90% 70% at 0% 100%, rgba(240, 120, 48, 0.06), transparent 55%),
+    var(--bg-base);
+}
+
+/* ============================================================
+   Semantic typography — apply with class or as base styles
+   ============================================================ */
+
+.ya-display {
+  font-family: var(--font-ui);
+  font-size: var(--text-5xl);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-1);
+}
+
+.ya-h1 {
+  font-family: var(--font-ui);
+  font-size: var(--text-4xl);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-1);
+}
+
+.ya-h2 {
+  font-family: var(--font-ui);
+  font-size: var(--text-3xl);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-1);
+}
+
+.ya-h3 {
+  font-family: var(--font-ui);
+  font-size: var(--text-xl);
+  line-height: var(--leading-snug);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-1);
+}
+
+.ya-h4 {
+  font-family: var(--font-ui);
+  font-size: var(--text-lg);
+  line-height: var(--leading-snug);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-1);
+}
+
+.ya-body {
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  font-weight: var(--weight-regular);
+  color: var(--ink-2);
+}
+
+.ya-body-sm,
+.ya-p {
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--ink-2);
+}
+
+.ya-caption {
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--ink-3);
+}
+
+.ya-micro {
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  color: var(--ink-3);
+  letter-spacing: var(--tracking-wide);
+}
+
+.ya-eyebrow {
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.ya-label {
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--ink-2);
+}
+
+.ya-mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-feature-settings: "ss01", "zero";
+  color: var(--ink-2);
+}
+
+.ya-jp {
+  font-family: var(--font-jp);
+  letter-spacing: 0;
+}
+
+/* ============================================================
+   Reusable primitives
+   ============================================================ */
+
+.ya-surface { background: var(--bg-surface); box-shadow: var(--shadow-raised); border-radius: var(--radius-lg); }
+.ya-sunken  { background: var(--bg-sunken);  box-shadow: var(--shadow-inset);  border-radius: var(--radius-lg); }
+.ya-glass {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+          backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+}
+
+/* selection */
+::selection { background: var(--primary-200); color: var(--primary-900); }
+[data-theme="yoru"] ::selection { background: var(--primary-300); color: var(--primary-50); }

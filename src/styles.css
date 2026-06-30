@@ -1,179 +1,222 @@
-:root {
-  --bg: #0e0f12;
-  --bg-elev: #16181d;
-  --fg: #f0eee8;
-  --fg-dim: #a8a59c;
-  --fg-faint: #5c5950;
-  --accent: #f8c85a;
-  --accent-dim: #8a7a3e;
-  --border: #2a2d33;
-  --line-height: 1.45;
-  font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei",
-    "Hiragino Sans GB", sans-serif;
-  font-size: 15px;
-  line-height: var(--line-height);
-  color: var(--fg);
-  background: var(--bg);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+/* LyricLens Desktop — built on the yoru-and-akari Console Design System.
+   tokens.css is copied verbatim from D:/DESIGN/yoru-and-akari Console
+   Design System2/colors_and_type.css. Don't edit it here — change it at
+   the source and re-copy. */
+@import "./tokens.css";
 
 html,
 body,
 .app {
   height: 100%;
   margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--ink-1);
+  background: var(--page-wash);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 .app {
   display: grid;
   grid-template-rows: auto 1fr auto;
-  gap: 0;
-  background: var(--bg);
-  color: var(--fg);
 }
 
+/* ─── now playing header ───────────────────────────────────── */
+
 .now-playing {
-  padding: 18px 20px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elev);
+  padding: var(--space-5) var(--space-5) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--line-1);
+  background: var(--bg-surface);
 }
 
 .now-playing .title {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  color: var(--ink-1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .now-playing .meta {
-  color: var(--fg-dim);
-  font-size: 13px;
-  margin-top: 2px;
+  font-size: var(--text-sm);
+  color: var(--ink-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .now-playing .meta .dot {
-  margin: 0 6px;
-  color: var(--fg-faint);
+  margin: 0 var(--space-2);
+  color: var(--ink-4);
 }
 
 .now-playing .status {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 10px;
-  font-size: 12px;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
 }
 
+/* ─── status badge — soft sunken pill, primary tint when live ─ */
+
 .badge {
-  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--bg-sunken);
+  box-shadow: var(--shadow-inset);
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+}
+
+.badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
   border-radius: 999px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--fg-dim);
-  text-transform: lowercase;
+  background: var(--ink-4);
 }
 
 .badge.live {
-  background: rgba(248, 200, 90, 0.12);
-  color: var(--accent);
-  border-color: var(--accent-dim);
+  color: var(--primary-700);
+  background: var(--primary-50);
+  box-shadow: none;
+}
+
+.badge.live::before {
+  background: var(--primary-500);
+  box-shadow: 0 0 0 3px rgba(79, 108, 232, 0.18);
+}
+
+[data-theme="yoru"] .badge.live {
+  color: var(--primary-800);
+}
+
+[data-theme="yoru"] .badge.live::before {
+  box-shadow: 0 0 0 3px rgba(122, 149, 250, 0.25);
 }
 
 .timing {
-  color: var(--fg-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-4);
   font-variant-numeric: tabular-nums;
 }
 
+/* ─── lyrics scroll region ────────────────────────────────── */
+
 .lyrics {
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: var(--space-5) var(--space-5);
   scroll-behavior: smooth;
 }
 
 .lyrics::-webkit-scrollbar {
-  width: 4px;
+  width: 3px;
 }
 .lyrics::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 4px;
+  background: var(--line-2);
+  border-radius: 999px;
 }
 
 .lyrics .placeholder {
-  color: var(--fg-faint);
+  color: var(--ink-3);
   text-align: center;
   margin: 30vh 0;
-  font-style: italic;
+  font-size: var(--text-sm);
 }
 
 .line {
-  padding: 6px 0;
-  font-size: 16px;
-  transition: color 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
+  padding: var(--space-2) 0;
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
+  color: var(--ink-3);
+  transition: color var(--dur-base) var(--ease-out),
+    font-size var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out);
 }
 
 .line.past {
-  color: var(--fg-faint);
+  color: var(--ink-4);
 }
 
 .line.future {
-  color: var(--fg-dim);
-  opacity: 0.65;
+  color: var(--ink-3);
 }
 
 .line.active {
-  color: var(--accent);
-  font-size: 19px;
-  font-weight: 600;
-  transform: translateX(2px);
+  color: var(--primary-600);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
 }
 
+[data-theme="yoru"] .line.active {
+  color: var(--primary-500);
+}
+
+/* ─── footer actions ──────────────────────────────────────── */
+
 .actions {
-  padding: 10px 20px;
-  border-top: 1px solid var(--border);
+  padding: var(--space-3) var(--space-5);
   display: flex;
   align-items: center;
-  gap: 12px;
-  background: var(--bg-elev);
+  gap: var(--space-3);
+  border-top: 1px solid var(--line-1);
+  background: var(--bg-surface);
 }
 
 button {
-  font: inherit;
-  background: transparent;
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 12px;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--ink-2);
+  background: var(--bg-surface);
+  border: none;
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  box-shadow: var(--shadow-raised);
+  transition: box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
+
 button:hover {
-  border-color: var(--accent-dim);
-  background: rgba(248, 200, 90, 0.06);
+  background: var(--bg-tint);
+  color: var(--ink-1);
 }
+
 button:active {
-  background: rgba(248, 200, 90, 0.14);
+  box-shadow: var(--shadow-inset);
+  transform: scale(0.985);
+}
+
+button:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-raised), var(--shadow-focus);
 }
 
 .hint {
-  color: var(--fg-faint);
-  font-size: 12px;
   margin-left: auto;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #faf8f2;
-    --bg-elev: #ffffff;
-    --fg: #1d1c18;
-    --fg-dim: #4f4c44;
-    --fg-faint: #8a857a;
-    --accent: #b48218;
-    --accent-dim: #d6b56b;
-    --border: #e5e1d6;
-  }
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-4);
+  letter-spacing: var(--tracking-wide);
 }

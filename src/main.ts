@@ -68,7 +68,7 @@ function formatTime(ms: number): string {
 }
 
 function liveStatus(np: NowPlaying | null): { label: string; live: boolean } {
-  if (!np) return { label: "no SMTC session", live: false };
+  if (!np) return { label: "no smtc session", live: false };
   if (!np.title) return { label: "session empty", live: false };
   if (np.status === "playing") return { label: "playing", live: true };
   return { label: np.status, live: false };
@@ -103,7 +103,7 @@ function renderLyrics() {
     return;
   }
   if (state.lines.length === 0) {
-    container.innerHTML = `<p class="placeholder">Start playing something — SMTC will pick it up.</p>`;
+    container.innerHTML = `<p class="placeholder">play something — smtc will pick it up.</p>`;
     return;
   }
 
@@ -145,12 +145,12 @@ async function fetchLyricsFor(np: NowPlaying) {
   if (state.fetchingLyrics) return;
   if (!np.title || !np.artist) {
     state.lines = [];
-    state.lyricsMessage = "Need title + artist from SMTC.";
+    state.lyricsMessage = "need title + artist from smtc.";
     renderLyrics();
     return;
   }
   state.fetchingLyrics = true;
-  state.lyricsMessage = "Looking up lyrics on LRCLIB…";
+  state.lyricsMessage = "looking up on lrclib…";
   state.lines = [];
   renderLyrics();
   try {
@@ -162,7 +162,7 @@ async function fetchLyricsFor(np: NowPlaying) {
     });
     if (result.instrumental) {
       state.lines = [];
-      state.lyricsMessage = "Marked instrumental on LRCLIB — no lyrics.";
+      state.lyricsMessage = "instrumental · no lyrics on lrclib.";
     } else if (result.syncedLyrics) {
       const lines = await invoke<LyricLine[]>("lrclib_parse_synced", {
         synced: result.syncedLyrics,
@@ -174,17 +174,17 @@ async function fetchLyricsFor(np: NowPlaying) {
         .split(/\r?\n/)
         .filter((s) => s.length > 0)
         .map((text) => ({ timeMs: 0, text }));
-      state.lyricsMessage = "Plain (unsynced) lyrics — no time stamps.";
+      state.lyricsMessage = "plain lyrics · no timestamps.";
     } else {
       state.lines = [];
-      state.lyricsMessage = "LRCLIB hit but no lyrics in payload.";
+      state.lyricsMessage = "lrclib hit but no lyrics in payload.";
     }
   } catch (err) {
     const e = err as CmdError;
     if (e?.kind === "not_found") {
-      state.lyricsMessage = "No match on LRCLIB.";
+      state.lyricsMessage = "no match on lrclib.";
     } else {
-      state.lyricsMessage = `Lookup error: ${(e as { message?: string })?.message ?? String(err)}`;
+      state.lyricsMessage = `lookup error · ${(e as { message?: string })?.message ?? String(err)}`;
     }
     state.lines = [];
   } finally {
@@ -208,10 +208,10 @@ async function pollSmtc() {
       state.np = null;
       state.trackKey = "";
       state.lines = [];
-      state.lyricsMessage = "No active SMTC session.";
+      state.lyricsMessage = "no smtc session.";
     } else {
       state.np = null;
-      state.lyricsMessage = `SMTC error: ${(e as { message?: string })?.message ?? String(err)}`;
+      state.lyricsMessage = `smtc error · ${(e as { message?: string })?.message ?? String(err)}`;
     }
   }
   renderNowPlaying();
