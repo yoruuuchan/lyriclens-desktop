@@ -15,10 +15,17 @@ import type { AnalysisCard } from "./analysis";
 
 const STORAGE_KEY = "lyriclens.desktop.analysis-cache";
 // Bump when a fix changes what the analysis pipeline *should* produce
-// for the same (trackKey, signature). v2 invalidates the v1 entries
+// for the same (trackKey, signature). v2 invalidated the v1 entries
 // that may have cached the ninelie-style "(End)" cards generated when
-// the search() candidate ranking picked a plain-only LRCLIB row.
-const CACHE_VERSION = 2;
+// the search() candidate ranking picked a plain-only LRCLIB row. v3
+// invalidates everything one more time because main.ts's trackKey()
+// now goes through the schema-canonical makeSongKey() — title/artist
+// are trim()'d before lowercasing, so any pre-existing key whose
+// metadata had stray whitespace at the edge would never hit again.
+// Bumping forces a one-time re-analysis instead of silent miss-then-
+// new-write that would leak token spend on entries the user thinks
+// are cached.
+const CACHE_VERSION = 3;
 const MAX_ENTRIES = 50;
 
 type CacheEntry = {
