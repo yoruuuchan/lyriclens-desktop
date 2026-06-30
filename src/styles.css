@@ -1447,6 +1447,42 @@ button.primary:active { box-shadow: inset 2px 2px 4px rgba(0, 0, 0, 0.18); }
   border-bottom: 1px solid var(--line-1);
 }
 
+/* Slides in only when at least one entry is selected; collapses to
+   display:none otherwise so it doesn't push the list down on idle. */
+.notebook-batch-bar {
+  display: none;
+}
+.notebook-batch-bar.is-active {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--primary-50);
+  border: 1px solid color-mix(in srgb, var(--primary-500) 25%, transparent);
+}
+.notebook-batch-count {
+  font-size: var(--text-xs);
+  color: var(--primary-700);
+  font-weight: var(--weight-medium);
+}
+.notebook-batch-actions {
+  display: inline-flex;
+  gap: var(--space-2);
+}
+.notebook-batch-actions button {
+  font-size: var(--text-xs);
+  padding: 4px var(--space-2);
+}
+.notebook-batch-actions button.danger {
+  color: var(--error-500);
+}
+.notebook-batch-actions button.danger:hover {
+  color: var(--error-700);
+}
+
 .notebook-count {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
@@ -1467,13 +1503,45 @@ button.primary:active { box-shadow: inset 2px 2px 4px rgba(0, 0, 0, 0.18); }
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  transition: box-shadow var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out);
+}
+.notebook-entry.is-selected {
+  background: var(--primary-50);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-500) 45%, transparent);
 }
 
 .notebook-entry-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
+}
+
+/* Native checkbox restyled to match the kp-option pattern but smaller
+   and without label text. Sits to the left of the song header. */
+.notebook-entry-check {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.notebook-entry-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--primary-500);
+  cursor: pointer;
+}
+
+/* The LLM-written note on a notebook entry — distinct from the user's
+   own `userNote` block below it. Reuses the lyric card phrasing
+   ("note · …") so the two views stay visually consistent. */
+.notebook-entry-analysis-note {
+  font-size: var(--text-sm);
+  color: var(--ink-3);
+  font-style: italic;
+  line-height: var(--leading-snug);
 }
 
 .notebook-entry-song {
