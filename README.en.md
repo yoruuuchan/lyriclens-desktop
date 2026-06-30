@@ -6,7 +6,7 @@ A standalone desktop companion that surfaces lyrics with LLM-powered learning no
 
 ## Status
 
-**Alpha · MVP UI/data shell complete.** SMTC pulls now-playing from any Windows player that exposes it (Spotify / QQ Music / foobar2000 / Edge media / …), LRCLIB resolves the synced lyrics, and the sync-scrolling lyric pane works. The 4-tab settings panel matches the BetterNCM plugin one-to-one. **The LLM card generator is the last missing piece** — settings are persisted and the prompt is composed, but no analysis request is dispatched yet.
+**Alpha · MVP loop wired, pending real-provider validation.** SMTC pulls now-playing from any Windows player that exposes it (Spotify / QQ Music / foobar2000 / Edge media / …), LRCLIB resolves the synced lyrics, the sync-scrolling lyric pane works, the 4-tab settings panel matches the BetterNCM plugin one-to-one, and OpenAI-compatible LLM cards now render inline under the active lyric line.
 
 ## Architecture
 
@@ -29,6 +29,7 @@ The two hosts are independent complete products. If BetterNCM dies, the desktop 
 - **SMTC reader** — Title / artist / album / duration / position / playback status pulled via `windows-rs` `Media_Control`. Polled every 1s; the frontend extrapolates position between polls for smooth lyric highlight.
 - **LRCLIB client** — `/api/get` with `/api/search` fallback, ±5s duration tolerance, LRC parser handles multi-stamp lines. (Probe E measured 97.9% hit rate across 290 songs in 8 categories — see the plugin repo's roadmap for the benchmark.)
 - **Sync-scrolling lyric pane** — Active line highlighted in primary blue, faded past/future lines, smooth scroll-into-view.
+- **LLM analysis pipeline** — Reuses the plugin prompt frame / typed-points schema, calls an OpenAI-compatible Chat Completions endpoint, parses JSON, and renders the learning card below the active lyric line.
 - **yoru-and-akari Console Design System** — Neumorphism surfaces, akari (light) / yoru (dark) themes, Geist + Noto Sans SC as bundled woff2 files (no Google Fonts round-trip, no fallback flash).
 - **Real window transparency** — Toggleable 40–100 % alpha. The desktop bleeds through behind the lyric pane while surfaces (now-playing strip, settings cards, footer) stay solid so text never blurs.
 - **Settings — 4 tabs matching the plugin** —
@@ -39,7 +40,7 @@ The two hosts are independent complete products. If BetterNCM dies, the desktop 
 
 ## What's not in the MVP yet
 
-- ⏳ **LLM analysis pipeline** — Last MVP gap. Prompt composition is ported; need to wire the OpenAI-compatible request + parse + card render. UI for where cards live is still TBD (inline vs. dock vs. split — pending design discussion).
+- ⏳ Real-provider validation: enter endpoint / key / model and confirm request, parsing, and inline card render all work end to end.
 - ⏳ Favorites / SQLite store (scaffolded but empty)
 - ⏳ Cross-host JSON import/export
 - ⏳ Vocab CDN, JLPT tagging, word-frequency stats

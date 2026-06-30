@@ -13,6 +13,23 @@ tags: `[plan]` route decision / `[ship]` shipped functionality / `[probe]` probe
 
 ---
 
+## 2026-06-30 [ship] LLM inline learning cards 接入
+
+承接 Yoru 确认的 inline 预览方案，把 MVP 闭环最后一块接进桌面端。现在 LRCLIB 拿到歌词后，会用 OpenAI 兼容 Chat Completions 请求生成 typed learning points，并把学习卡片显示在当前高亮歌词行下方。
+
+做了什么：
+- 新增 `src/analysis.ts`，复制插件端 prompt frame / default focus / typed points normalize 的简化版，保留 `response_format` auto fallback
+- `src/main.ts` 接入 trackKey 绑定的分析状态：`thinking` / `ready` / `setup` / `error`
+- 当前行下方 inline 渲染学习卡片；翻译块用 inset surface，知识点用设计系统 token 做 pill badge
+- 切歌、歌词请求、分析请求都按 trackKey 防旧请求覆盖新歌状态
+- 保存 AI 设置后，如果之前缺配置或分析失败，会自动用当前歌词重试
+- 新增 `docs/previews/llm-inline-card-preview.html` 和截图作为设计对照
+- `npm run build` 通过，`npm run tauri build` 通过并生成 `.msi` / NSIS 安装包
+
+下一步：
+- 用真实 endpoint / key / model 真机验收一次 LLM 请求、JSON 解析和 inline 卡片显示
+- 验收通过后再考虑收藏 / SQLite 或跨 host JSON 数据格式
+
 ## 2026-06-30 [ship] MVP UI/数据壳子完整，差 LLM 接入
 
 承接 scaffold 那条，一天内把 MVP 的 UI/数据壳子做齐了。**唯一缺的是 LLM 调用** —— 拉到 LRC 但没让模型生成卡片。
