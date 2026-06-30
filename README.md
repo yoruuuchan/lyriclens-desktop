@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**Alpha · MVP 壳子完整，LLM 接入待办。** SMTC 拿播放信息、LRCLIB 拉同步歌词、同步滚动歌词面板、4 tab 完整设置（跟 BetterNCM 插件一对一对齐）都好了。**唯一缺的是 LLM 卡片生成**——设置项都持久化了、prompt 拼好了，但还没真发分析请求。
+**Alpha · MVP 闭环已接通，等待真实 provider 验收。** SMTC 拿播放信息、LRCLIB 拉同步歌词、同步滚动歌词面板、4 tab 完整设置（跟 BetterNCM 插件一对一对齐）、OpenAI 兼容 LLM 分析和当前歌词行下方 inline 学习卡片都已经接上。
 
 ## 架构
 
@@ -31,6 +31,7 @@ LyricLens 是「一个产品，两个 host」，本仓库是 **host 2**（桌面
 - **SMTC 读取** — title / artist / album / duration / position / 播放状态，通过 `windows-rs` 的 `Media_Control` feature 拉取。每秒轮询，前端在两次轮询之间做位置外推，高亮平滑滚动
 - **LRCLIB 客户端** — `/api/get` + `/api/search` fallback，时长 ±5s 容差，LRC 解析支持多时间戳行。（探针 E 在 290 首歌 8 类别上实测命中率 97.9%，详见插件仓库 roadmap）
 - **同步滚动歌词面板** — 当前行 primary blue 高亮、前后行渐隐、平滑居中滚动
+- **LLM 分析管线** — 复用插件端 prompt frame / typed points schema，调用 OpenAI 兼容 Chat Completions，解析 JSON 后把学习卡片显示在当前歌词行下方
 - **yoru-and-akari Console 设计系统** — 神经形态卡片、akari（浅）/ yoru（深）双主题、Geist + Noto Sans SC 以 woff2 形式打包进 dist（不走 Google Fonts，没有 fallback 闪烁）
 - **真窗口透明** — 40–100% 可调。桌面从歌词面板后透出，但 now-playing 条 / 设置卡片 / 底栏等含文字的表面保持不透明，字永远清晰
 - **设置面板 4 tab（跟插件对齐）** —
@@ -41,7 +42,7 @@ LyricLens 是「一个产品，两个 host」，本仓库是 **host 2**（桌面
 
 ## MVP 还差什么
 
-- ⏳ **LLM 分析管线** — MVP 最后一块。Prompt 拼装已就绪，需要接 OpenAI 兼容请求 + JSON 解析 + 卡片渲染。卡片在 UI 中放哪儿（行内展开 / 侧栏 / 浮层 / 底部 dock）还在讨论
+- ⏳ 真实 provider 验收：填 endpoint / key / model，确认请求、解析、inline 卡片显示都跑通
 - ⏳ 收藏 / SQLite 存储（脚手架在但空着）
 - ⏳ 跨 host JSON 导入/导出
 - ⏳ 词库 CDN、JLPT 等级标签、词频统计

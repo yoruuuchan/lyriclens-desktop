@@ -5,6 +5,18 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import {
+  analysisSettingsSignature,
+  buildDefaultFocus,
+  missingAnalysisConfig,
+  requestAnalysis,
+  toAnalysisInputLines,
+  type AnalysisCard,
+  type CardMode,
+  type KnowledgePoint,
+  type ResponseFormatMode,
+  type ThinkingMode,
+} from "./analysis";
 
 const APP_VERSION = "0.1.0";
 const FEEDBACK_URL = "https://lyriclens.yoru-and-akari.dev/feedback";
@@ -30,11 +42,6 @@ type CmdError =
 
 type Theme = "akari" | "yoru";
 type FontSize = "compact" | "standard" | "large";
-type KnowledgePoint = "vocabulary" | "grammar" | "culture" | "pronunciation" | "tone";
-type CardMode = "per-line" | "selected";
-type ThinkingMode = "off" | "auto" | "high" | "max";
-type ResponseFormatMode = "auto" | "json_object" | "off";
-
 type Settings = {
   autoAnalyze: boolean;
   theme: Theme;
@@ -209,65 +216,6 @@ function normalizeEndpoint(raw: string): string {
   return stripped;
 }
 
-// ─── default focus block (mirrors plugin/src/api.js buildDefaultFocus)
-//
-// The textarea in 学习偏好 → 自定义 Prompt previews this string when the
-// user hasn't customized anything yet. Editing target language, points
-// or card mode regenerates it. Saving customPrompt back to settings only
-// stores a non-empty value when the textarea has actually drifted from
-// the current default — that way removing checkboxes / changing target
-// language keeps reflecting in the prompt instead of getting silently
-// pinned to a stale snapshot.
-
-const KNOWLEDGE_POINT_SNIPPETS: Record<KnowledgePoint, string> = {
-  vocabulary:
-    "Vocabulary: highlight important words, phrases, and collocations; explain meaning and usage.",
-  grammar:
-    "Grammar: explain sentence structures, verb conjugations, tense, and grammatical patterns.",
-  culture:
-    "Cultural context: explain idioms, cultural references, allusions, and background.",
-  pronunciation:
-    "Pronunciation: note phonetic features, stress, liaison, pitch accent, or common pitfalls.",
-  tone: "Tone & feeling: describe emotional nuance, register, and rhetorical effect.",
-};
-
-function buildDefaultFocus(
-  targetLanguage: string,
-  points: KnowledgePoint[],
-  isSelected: boolean,
-): string {
-  const validPoints = points.filter((p) => KNOWLEDGE_POINT_SNIPPETS[p]);
-  const focusLines = validPoints.map(
-    (k) => `- type "${k}" — ${KNOWLEDGE_POINT_SNIPPETS[k]}`,
-  );
-  const allowedTypes =
-    validPoints.length > 0
-      ? validPoints.join(", ")
-      : "vocabulary, grammar, culture, pronunciation, tone";
-  const focusBlock =
-    focusLines.length > 0
-      ? `Focus areas (produce AT MOST one point per area, skip the area entirely if there is nothing valuable to say about it for that line):\n${focusLines.join(
-          "\n",
-        )}`
-      : "";
-  if (isSelected) {
-    return `Content rules:
-- translation: short ${targetLanguage} translation, one sentence.
-- points: array of {"type", "text"} objects. Only use these types: ${allowedTypes}.
-- text: ≤24 ${targetLanguage} characters. Avoid filler.
-- note: cultural or usage note, ≤60 ${targetLanguage} characters. Can be empty string.
-- If referenceTranslation or romanLyric is provided, use it only as reference.
-${focusBlock}`;
-  }
-  return `Content rules:
-- translation must be natural ${targetLanguage}.
-- points: array of {"type", "text"} objects. Only use these types: ${allowedTypes}.
-- text: ≤50 ${targetLanguage} characters per point. Avoid filler.
-- note: ≤100 ${targetLanguage} characters. Use for general feeling/meaning that doesn't fit a specific type.
-- If referenceTranslation or romanLyric is provided, use it only as reference.
-${focusBlock}`;
-}
-
 // ─── theme / font-size / opacity ─────────────────────────────
 
 function applyTheme(theme: Theme) {
@@ -353,12 +301,23 @@ const el = {
 
 // ─── state ───────────────────────────────────────────────────
 
+type AnalysisStatus = "idle" | "loading" | "ready" | "error" | "missing-config";
+
 const state = {
   np: null as NowPlaying | null,
   trackKey: "",
   lines: [] as LyricLine[],
   fetchingLyrics: false,
+  fetchingLyricsKey: "",
   lyricsMessage: "",
+  analysis: {
+    trackKey: "",
+    settingsSignature: "",
+    status: "idle" as AnalysisStatus,
+    cards: new Map<number, AnalysisCard>(),
+    message: "",
+    controller: null as AbortController | null,
+  },
   settings: loadSettings(),
   dirty: false,
   // Most recent default focus block written into the prompt textarea.
@@ -425,6 +384,153 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+const POINT_TYPE_LABELS: Record<AnalysisCard["points"][number]["type"], string> = {
+  vocabulary: "词汇",
+  grammar: "语法",
+  culture: "文化背景",
+  pronunciation: "发音",
+  tone: "语感",
+  general: "补充",
+};
+
+function resetAnalysis(trackKeyValue = "") {
+  state.analysis.controller?.abort();
+  state.analysis.trackKey = trackKeyValue;
+  state.analysis.settingsSignature = "";
+  state.analysis.status = "idle";
+  state.analysis.cards = new Map();
+  state.analysis.message = "";
+  state.analysis.controller = null;
+}
+
+function renderAnalysisLoadingCard(): string {
+  return `<article class="analysis-card loading" aria-label="学习卡片生成中">
+    <div class="analysis-head">
+      <div class="analysis-kicker">
+        <span class="analysis-dot" aria-hidden="true"></span>
+        <span class="analysis-title">analysis</span>
+      </div>
+      <span class="analysis-status">thinking</span>
+    </div>
+    <div class="translation-block" aria-hidden="true">
+      <span class="typing-dot"></span>
+      <span class="typing-dot"></span>
+      <span class="typing-dot"></span>
+    </div>
+  </article>`;
+}
+
+function renderAnalysisMessageCard(kind: "setup" | "error", message: string): string {
+  return `<article class="analysis-card message ${kind}" aria-label="学习卡片状态">
+    <div class="analysis-head">
+      <div class="analysis-kicker">
+        <span class="analysis-dot" aria-hidden="true"></span>
+        <span class="analysis-title">analysis</span>
+      </div>
+      <span class="analysis-status">${kind}</span>
+    </div>
+    <div class="translation-block">
+      <p class="translation-text">${escapeHtml(message)}</p>
+    </div>
+  </article>`;
+}
+
+function renderAnalysisCard(card: AnalysisCard): string {
+  const start = card.startMs;
+  const time = Number.isFinite(start) && start !== null ? ` · ${formatTime(start)}` : "";
+  const translation = card.translation.trim()
+    ? `<div class="translation-block">
+        <span class="translation-label">translation</span>
+        <p class="translation-text">${escapeHtml(card.translation)}</p>
+      </div>`
+    : "";
+  const points = card.points
+    .map((point) => {
+      const label = POINT_TYPE_LABELS[point.type] || POINT_TYPE_LABELS.general;
+      return `<div class="point-row">
+        <span class="point-badge ${escapeHtml(point.type)}">${escapeHtml(label)}</span>
+        <p class="point-text">${escapeHtml(point.text)}</p>
+      </div>`;
+    })
+    .join("");
+  const note = card.note.trim()
+    ? `<p class="analysis-note">note · ${escapeHtml(card.note.trim())}</p>`
+    : "";
+
+  return `<article class="analysis-card" aria-label="当前歌词学习卡片">
+    <div class="analysis-head">
+      <div class="analysis-kicker">
+        <span class="analysis-dot" aria-hidden="true"></span>
+        <span class="analysis-title">analysis${time}</span>
+      </div>
+      <span class="analysis-status">ready</span>
+    </div>
+    ${translation}
+    ${points ? `<div class="point-list">${points}</div>` : ""}
+    ${note}
+  </article>`;
+}
+
+function renderAnalysisSlot(lineIndex: number): string {
+  const analysis = state.analysis;
+  if (!state.trackKey || analysis.trackKey !== state.trackKey) return "";
+  if (analysis.status === "loading") return renderAnalysisLoadingCard();
+  if (analysis.status === "missing-config") {
+    return renderAnalysisMessageCard("setup", analysis.message);
+  }
+  if (analysis.status === "error") {
+    return renderAnalysisMessageCard("error", analysis.message);
+  }
+  if (analysis.status === "ready") {
+    const card = analysis.cards.get(lineIndex);
+    return card ? renderAnalysisCard(card) : "";
+  }
+  return "";
+}
+
+async function startAnalysisForTrack(trackKeyValue: string, lines: LyricLine[]) {
+  const inputLines = toAnalysisInputLines(lines, state.settings.maxAnalysisLines);
+  resetAnalysis(trackKeyValue);
+  state.analysis.settingsSignature = analysisSettingsSignature(state.settings);
+
+  if (!inputLines.length) {
+    renderLyrics();
+    return;
+  }
+
+  const missing = missingAnalysisConfig(state.settings);
+  if (missing) {
+    state.analysis.status = "missing-config";
+    state.analysis.message = missing;
+    renderLyrics();
+    return;
+  }
+
+  const controller = new AbortController();
+  state.analysis.status = "loading";
+  state.analysis.message = "";
+  state.analysis.controller = controller;
+  renderLyrics();
+
+  try {
+    const cards = await requestAnalysis(state.settings, inputLines, controller.signal);
+    if (controller.signal.aborted || state.trackKey !== trackKeyValue) return;
+    state.analysis.status = "ready";
+    state.analysis.cards = new Map(cards.map((card) => [card.lineIndex, card]));
+    state.analysis.message = "";
+  } catch (err) {
+    if (controller.signal.aborted || state.trackKey !== trackKeyValue) return;
+    state.analysis.status = "error";
+    state.analysis.message = (err as Error)?.message || String(err);
+    state.analysis.cards = new Map();
+  } finally {
+    if (state.analysis.controller === controller) {
+      state.analysis.controller = null;
+      renderLyrics();
+    }
+  }
+}
+
 function renderLyrics() {
   const container = el.lyrics();
   if (state.lyricsMessage && state.lines.length === 0) {
@@ -448,7 +554,8 @@ function renderLyrics() {
       else if (i < activeIdx) classes.push("past");
       else classes.push("future");
       const text = line.text || "♪";
-      return `<div class="${classes.join(" ")}" data-i="${i}">${escapeHtml(text)}</div>`;
+      const card = i === activeIdx ? renderAnalysisSlot(i) : "";
+      return `<div class="${classes.join(" ")}" data-i="${i}">${escapeHtml(text)}</div>${card}`;
     })
     .join("");
   container.innerHTML = html;
@@ -457,17 +564,22 @@ function renderLyrics() {
 }
 
 async function fetchLyricsFor(np: NowPlaying) {
-  if (state.fetchingLyrics) return;
+  const key = trackKey(np);
+  if (state.fetchingLyricsKey === key) return;
   if (!np.title || !np.artist) {
     state.lines = [];
     state.lyricsMessage = "缺少歌曲标题或艺人，无法查询。";
+    resetAnalysis(key);
     renderLyrics();
     return;
   }
   state.fetchingLyrics = true;
+  state.fetchingLyricsKey = key;
   state.lyricsMessage = "正在 LRCLIB 查询…";
   state.lines = [];
+  resetAnalysis(key);
   renderLyrics();
+  let canAnalyze = false;
   try {
     const result = await invoke<LyricResult>("lrclib_find", {
       trackName: np.title,
@@ -475,6 +587,7 @@ async function fetchLyricsFor(np: NowPlaying) {
       albumName: np.album || null,
       durationSecs: np.durationMs > 0 ? np.durationMs / 1000 : null,
     });
+    if (state.trackKey !== key) return;
     if (result.instrumental) {
       state.lines = [];
       state.lyricsMessage = "纯音乐 · LRCLIB 未标注歌词。";
@@ -484,12 +597,14 @@ async function fetchLyricsFor(np: NowPlaying) {
       });
       state.lines = lines;
       state.lyricsMessage = "";
+      canAnalyze = lines.length > 0;
     } else if (result.plainLyrics) {
       state.lines = result.plainLyrics
         .split(/\r?\n/)
         .filter((s) => s.length > 0)
         .map((text) => ({ timeMs: 0, text }));
       state.lyricsMessage = "仅纯文本歌词，无时间轴。";
+      canAnalyze = state.lines.length > 0;
     } else {
       state.lines = [];
       state.lyricsMessage = "LRCLIB 命中但歌词为空。";
@@ -503,8 +618,14 @@ async function fetchLyricsFor(np: NowPlaying) {
     }
     state.lines = [];
   } finally {
-    state.fetchingLyrics = false;
+    if (state.fetchingLyricsKey === key) {
+      state.fetchingLyrics = false;
+      state.fetchingLyricsKey = "";
+    }
     renderLyrics();
+    if (canAnalyze && state.trackKey === key && state.settings.autoAnalyze) {
+      void startAnalysisForTrack(key, state.lines);
+    }
   }
 }
 
@@ -524,9 +645,11 @@ async function pollSmtc() {
       state.trackKey = "";
       state.lines = [];
       state.lyricsMessage = "没有活跃的 SMTC 会话。播放一首歌就行。";
+      resetAnalysis();
     } else {
       state.np = null;
       state.lyricsMessage = `SMTC 出错 · ${(e as { message?: string })?.message ?? String(err)}`;
+      resetAnalysis();
     }
   }
   renderNowPlaying();
@@ -1023,6 +1146,7 @@ function bindSettingsForm() {
   el.cancelBtn().addEventListener("click", closeSettings);
   el.saveBtn().addEventListener("click", () => {
     const next = readForm();
+    const nextAnalysisSignature = analysisSettingsSignature(next);
     state.settings = next;
     saveSettings(next);
     applyTheme(next.theme);
@@ -1030,6 +1154,18 @@ function bindSettingsForm() {
     applyOpacity(next.panelOpacity);
     setDirty(false);
     showSavedToast();
+    if (!next.autoAnalyze) {
+      resetAnalysis(state.trackKey);
+      renderLyrics();
+    } else if (
+      state.trackKey &&
+      state.lines.length > 0 &&
+      (nextAnalysisSignature !== state.analysis.settingsSignature ||
+        state.analysis.status === "missing-config" ||
+        state.analysis.status === "error")
+    ) {
+      void startAnalysisForTrack(state.trackKey, state.lines);
+    }
   });
   el.testBtn().addEventListener("click", testConnection);
   el.fbSend().addEventListener("click", sendFeedback);

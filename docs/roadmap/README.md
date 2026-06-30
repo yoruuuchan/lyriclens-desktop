@@ -16,15 +16,15 @@ Stage 0 · Scaffold (this commit)
 └─ ✅ Cargo + npm dependencies for SMTC + LRCLIB
 
 Stage 1 · MVP loop (Windows only)
-├─ ⏳ Task #1 · SMTC reader (windows-rs Media_Control)
-├─ ⏳ Task #2 · LRCLIB client (title + artist + duration → synced LRC)
-├─ ⏳ Task #3 · Sync-scrolling lyric UI
-└─ ⏳ Task #4 · LLM analysis (copy plugin's prompt + card schema)
+├─ ✅ Task #1 · SMTC reader (windows-rs Media_Control)
+├─ ✅ Task #2 · LRCLIB client (title + artist + duration → synced LRC)
+├─ ✅ Task #3 · Sync-scrolling lyric UI
+└─ ✅ Task #4 · LLM analysis (copy plugin's prompt + card schema)
 
 Stage 2 · Productization
 ├─ ⏳ SQLite for favorites
-├─ ⏳ Settings UI (provider / model / prompt)
-└─ ⏳ Installer (.msi via tauri bundle)
+├─ ✅ Settings UI (provider / model / prompt)
+└─ ✅ Installer (.msi via tauri bundle)
 
 Stage 3 · Cross-host data interchange
 ├─ ⏳ JSON export schema agreed with plugin repo

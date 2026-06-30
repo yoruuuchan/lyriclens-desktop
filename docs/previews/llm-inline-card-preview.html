@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LyricLens inline card preview</title>
+    <link rel="stylesheet" href="../../src/styles.css" />
+    <style>
+      html,
+      body {
+        height: auto;
+        min-height: 100%;
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+        background: var(--page-wash);
+        color: var(--ink-1);
+        display: grid;
+        place-items: start center;
+        box-sizing: border-box;
+      }
+
+      .preview-frame {
+        width: min(100%, 1040px);
+        display: grid;
+        grid-template-columns: repeat(2, minmax(360px, 480px));
+        gap: 24px;
+        align-items: start;
+      }
+
+      .preview-window {
+        height: 720px;
+        border-radius: var(--radius-xl);
+        overflow: hidden;
+        box-shadow: var(--shadow-pop);
+        background: var(--bg-base);
+      }
+
+      .preview-window .app {
+        height: 100%;
+      }
+
+      .preview-window .lyrics {
+        padding-bottom: var(--space-8);
+      }
+
+      .preview-label {
+        margin: 0 0 var(--space-3);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--ink-3);
+        letter-spacing: var(--tracking-wide);
+      }
+
+      .analysis-card {
+        margin: var(--space-2) 0 var(--space-5);
+        padding: var(--space-4);
+        border-radius: var(--radius-lg);
+        background: var(--bg-surface);
+        color: var(--ink-2);
+        box-shadow: var(--shadow-raised);
+        animation: card-enter var(--dur-base) var(--ease-out);
+      }
+
+      @keyframes card-enter {
+        from {
+          opacity: 0;
+          transform: translateY(6px) scale(0.985);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .analysis-card {
+          animation: none;
+        }
+      }
+
+      .analysis-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        margin-bottom: var(--space-3);
+      }
+
+      .analysis-kicker {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        min-width: 0;
+      }
+
+      .analysis-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: var(--radius-pill);
+        background: var(--primary-500);
+        box-shadow: 0 0 0 3px rgb(79 108 232 / 0.18);
+        flex-shrink: 0;
+      }
+
+      [data-theme="yoru"] .analysis-dot {
+        box-shadow: 0 0 0 3px rgb(122 149 250 / 0.25);
+      }
+
+      .analysis-title {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--ink-3);
+        letter-spacing: var(--tracking-wide);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .analysis-status {
+        padding: 3px var(--space-2);
+        border-radius: var(--radius-pill);
+        background: var(--bg-sunken);
+        box-shadow: var(--shadow-inset);
+        color: var(--ink-3);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        white-space: nowrap;
+      }
+
+      .translation-block {
+        padding: var(--space-3);
+        border-radius: var(--radius-md);
+        background: var(--bg-sunken);
+        box-shadow: var(--shadow-inset);
+        margin-bottom: var(--space-3);
+      }
+
+      .translation-label {
+        display: block;
+        margin-bottom: 3px;
+        font-family: var(--font-mono);
+        font-size: var(--text-2xs);
+        color: var(--ink-4);
+        letter-spacing: var(--tracking-wide);
+      }
+
+      .translation-text {
+        margin: 0;
+        color: var(--ink-1);
+        font-size: var(--text-sm);
+        line-height: var(--leading-normal);
+      }
+
+      .point-list {
+        display: grid;
+        gap: var(--space-2);
+      }
+
+      .point-row {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: var(--space-2);
+        align-items: start;
+      }
+
+      .point-badge {
+        min-width: 42px;
+        padding: 3px var(--space-2);
+        border-radius: var(--radius-pill);
+        font-size: var(--text-xs);
+        font-weight: var(--weight-medium);
+        line-height: var(--leading-snug);
+        text-align: center;
+        box-shadow: var(--shadow-flat);
+      }
+
+      .point-badge.vocabulary {
+        background: var(--primary-100);
+        color: var(--primary-700);
+      }
+
+      .point-badge.grammar {
+        background: var(--frost-100);
+        color: var(--frost-700);
+      }
+
+      .point-badge.tone {
+        background: var(--ember-100);
+        color: var(--ember-700);
+      }
+
+      .point-text {
+        margin: 0;
+        color: var(--ink-2);
+        font-size: var(--text-sm);
+        line-height: var(--leading-normal);
+      }
+
+      .analysis-note {
+        margin: var(--space-3) 0 0;
+        padding-top: var(--space-3);
+        border-top: 1px solid var(--line-1);
+        color: var(--ink-3);
+        font-size: var(--text-xs);
+        line-height: var(--leading-normal);
+      }
+
+      .analysis-card.loading .translation-block {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        min-height: 36px;
+      }
+
+      .typing-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: var(--radius-pill);
+        background: var(--primary-500);
+        opacity: 0.45;
+        animation: pulse-dot 1.2s var(--ease-out) infinite;
+      }
+
+      .typing-dot:nth-child(2) {
+        animation-delay: 120ms;
+      }
+
+      .typing-dot:nth-child(3) {
+        animation-delay: 240ms;
+      }
+
+      @keyframes pulse-dot {
+        0%,
+        70%,
+        100% {
+          opacity: 0.35;
+          transform: translateY(0);
+        }
+        35% {
+          opacity: 1;
+          transform: translateY(-2px);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .typing-dot {
+          animation: none;
+        }
+      }
+
+      @media (max-width: 860px) {
+        body {
+          padding: 16px;
+        }
+
+        .preview-frame {
+          grid-template-columns: minmax(0, 480px);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="preview-frame">
+      <section>
+        <p class="preview-label">yoru · inline card under active lyric</p>
+        <div class="preview-window" data-theme="yoru" data-font-size="standard">
+          <main class="app">
+            <header class="now-playing">
+              <div class="title-row">
+                <div class="title">One Last Kiss</div>
+                <div class="icon-buttons">
+                  <button class="icon" type="button" aria-label="切换主题">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                    </svg>
+                  </button>
+                  <button class="icon" type="button" aria-label="设置">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="meta">
+                <span>宇多田ヒカル</span>
+                <span class="dot" aria-hidden="true">·</span>
+                <span>BADモード</span>
+              </div>
+              <div class="status">
+                <span class="badge live">正在播放</span>
+                <span class="timing">01:14 / 04:12</span>
+              </div>
+            </header>
+
+            <section class="lyrics" aria-label="歌词与学习卡片预览">
+              <div class="line past">Can you give me one last kiss?</div>
+              <div class="line past">忘れたくないこと</div>
+              <div class="line active">I love you more than you'll ever know</div>
+
+              <article class="analysis-card" aria-label="当前歌词学习卡片">
+                <div class="analysis-head">
+                  <div class="analysis-kicker">
+                    <span class="analysis-dot" aria-hidden="true"></span>
+                    <span class="analysis-title">analysis · 01:14</span>
+                  </div>
+                  <span class="analysis-status">ready</span>
+                </div>
+                <div class="translation-block">
+                  <span class="translation-label">translation</span>
+                  <p class="translation-text">我爱你，比你将会知道的还要深。</p>
+                </div>
+                <div class="point-list">
+                  <div class="point-row">
+                    <span class="point-badge vocabulary">词汇</span>
+                    <p class="point-text">ever 放在比较级前，强调“任何时候都不会超过这个程度”。</p>
+                  </div>
+                  <div class="point-row">
+                    <span class="point-badge grammar">语法</span>
+                    <p class="point-text">more than you'll ever know 是省略比较对象的情感表达。</p>
+                  </div>
+                  <div class="point-row">
+                    <span class="point-badge tone">语感</span>
+                    <p class="point-text">这句不是解释事实，而是把“说不尽”当作告别的余韵。</p>
+                  </div>
+                </div>
+                <p class="analysis-note">note · 情绪比字面更重，翻译时保留一点克制会更贴近原句。</p>
+              </article>
+
+              <div class="line future">君以上に大事なもの</div>
+              <div class="line future">そんなのもうないの</div>
+              <div class="line future">これが最後のキス</div>
+            </section>
+
+            <footer class="actions">
+              <button type="button">重新拉取</button>
+              <span class="hint">每秒轮询</span>
+            </footer>
+          </main>
+        </div>
+      </section>
+
+      <section>
+        <p class="preview-label">akari · loading state</p>
+        <div class="preview-window" data-theme="akari" data-font-size="standard">
+          <main class="app">
+            <header class="now-playing">
+              <div class="title-row">
+                <div class="title">After Rain</div>
+                <div class="icon-buttons">
+                  <button class="icon" type="button" aria-label="切换主题">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="4" />
+                      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+                    </svg>
+                  </button>
+                  <button class="icon" type="button" aria-label="设置">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="meta">
+                <span>Aimer</span>
+                <span class="dot" aria-hidden="true">·</span>
+                <span>After Dark</span>
+              </div>
+              <div class="status">
+                <span class="badge live">正在播放</span>
+                <span class="timing">00:43 / 04:48</span>
+              </div>
+            </header>
+
+            <section class="lyrics" aria-label="歌词与加载态预览">
+              <div class="line past">Before the rain, before the sound</div>
+              <div class="line active">I couldn't see the light around</div>
+
+              <article class="analysis-card loading" aria-label="学习卡片加载中">
+                <div class="analysis-head">
+                  <div class="analysis-kicker">
+                    <span class="analysis-dot" aria-hidden="true"></span>
+                    <span class="analysis-title">analysis · 00:43</span>
+                  </div>
+                  <span class="analysis-status">thinking</span>
+                </div>
+                <div class="translation-block" aria-hidden="true">
+                  <span class="typing-dot"></span>
+                  <span class="typing-dot"></span>
+                  <span class="typing-dot"></span>
+                </div>
+              </article>
+
+              <div class="line future">But after rain, the air is clear</div>
+              <div class="line future">The city breathes, and you are near</div>
+              <div class="line future">I hold the quiet in my hands</div>
+            </section>
+
+            <footer class="actions">
+              <button type="button">重新拉取</button>
+              <span class="hint">每秒轮询</span>
+            </footer>
+          </main>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
