@@ -30,21 +30,24 @@ Stage 3 · Cross-host data interchange
 ├─ ⏳ JSON export schema agreed with plugin repo
 └─ ⏳ Import from plugin export
 
-Stage 4 · Cross-platform
-├─ ⏳ macOS (MRMediaRemote, private API risk)
-└─ ⏳ Linux (MPRIS)
+Stage 4 · ~~Cross-platform~~ **Cancelled 2026-06-30**
+└─ Locked: Windows only. macOS / Linux not on the roadmap anymore.
 ```
 
 ## Locked decisions
 
-(All inherited from the plugin repo's roadmap and re-affirmed here.)
+(All inherited from the plugin repo's roadmap and re-affirmed here. The plugin repo at `D:\LyricLens\docs\roadmap\README.md` is the canonical decision log — additions made there auto-apply here.)
 
 1. **Two-host north star.** Plugin and desktop are independent complete products.
-2. **MVP = Windows only.** macOS/Linux come after the Windows loop works end-to-end.
+2. **Windows only.** macOS / Linux explicitly cancelled on 2026-06-30 (see plugin roadmap decision #11). `阶段 4 · Cross-platform` is dead.
 3. **LRCLIB is the lyric source.** 97.9% hit rate measured across 290 songs in probe E.
-4. **SMTC is the now-playing source.** Covers Spotify / QQ / foobar2000; NCM Win32 needs BetterNCM bridge (plugin host handles that).
-5. **No core extraction yet.** Copy prompt + card schema verbatim from the plugin. Extract a shared core only after both hosts have stabilized.
-6. **No live sync between hosts.** JSON export/import only.
+4. **SMTC is the now-playing source — but treated as a tiered capability**, not a yes/no interface. See plugin roadmap decision #18: `timeline_healthy` enables row-level sync, `metadata_only` falls back to static notebook-style cards. Background: SMTC timeline research report at `C:\Users\15877\Downloads\lyriclens_smtc_timeline_research.md`.
+5. **Core extraction deferred.** Copy prompt + card schema verbatim from the plugin for MVP. Extract a shared `@lyriclens/core` package only after the desktop SQLite schema and per-line batching stabilize. Premature extraction will re-do the interface.
+6. **No live sync between hosts.** JSON export/import only. Merge rule: both sides preserved, `userNote` concatenated with `---来自 <source>---` separator. See plugin roadmap decision #15 and [`NotebookEntry` schema](../../../LyricLens/docs/schema/notebook-entry.md).
+7. **Learning loop = notebook-style.** Star + user-written notes + Anki export. No SRS. No word-frequency counter. Plugin roadmap decision #13.
+8. **Notebook entry granularity = one lyric line's full card** (original + translation + all highlights + LLM note + userNote bundled). Not per-highlight, not per-vocab. Plugin roadmap decision #14.
+9. **MVP vocabulary stack = CEFR-J (English) + JLPT (Japanese) dual.** JLPT source needs license vetting (in flight). Plugin roadmap decision #12.
+10. **Permanently out of scope** (do not re-propose without re-opening the discussion): WASAPI loopback for position derivation, NCM InfLink-rs compatibility, Spotify Web API deep integration, any Apple-ecosystem support, live cross-host sync, SRS, word-frequency stats, WAV-onset auto-alignment to LRC. Plugin roadmap decision #17.
 
 ## Progress
 
