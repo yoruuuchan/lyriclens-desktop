@@ -250,6 +250,56 @@ body {
 }
 [data-theme="yoru"] .line.active { color: var(--primary-500); }
 
+/* Persistent status line above the lyric list. Always visible while the
+   LLM call is in flight, errored, or unconfigured — so the user sees the
+   state even when SMTC doesn't report a play position (no active line). */
+.analysis-status-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  box-shadow: var(--shadow-inset);
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+}
+
+.analysis-status-line .analysis-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--primary-500);
+  box-shadow: 0 0 0 3px rgb(79 108 232 / 0.18);
+  flex-shrink: 0;
+}
+
+[data-theme="yoru"] .analysis-status-line .analysis-dot {
+  box-shadow: 0 0 0 3px rgb(122 149 250 / 0.25);
+}
+
+.analysis-status-line.error .analysis-dot {
+  background: var(--error-500);
+  box-shadow: 0 0 0 3px rgba(212, 93, 93, 0.22);
+}
+
+.analysis-status-line.setup .analysis-dot {
+  background: var(--warning-500);
+  box-shadow: 0 0 0 3px rgba(216, 154, 58, 0.22);
+}
+
+.analysis-status-line.loading .analysis-dot {
+  animation: pulse-dot 1.2s var(--ease-out) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analysis-status-line.loading .analysis-dot {
+    animation: none;
+  }
+}
+
 /* Inline LLM learning card. It appears directly below the active lyric
    line so the explanation stays bound to the sentence the user is hearing. */
 .analysis-card {
