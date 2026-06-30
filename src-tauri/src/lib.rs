@@ -111,10 +111,25 @@ async fn notebook_remove(
     Ok(notebook::remove(&conn, &id)?)
 }
 
+// JSON export — the JS side picks the save path via the dialog plugin
+// and hands it to us. Returns the entry count for the success toast.
+// The file write is sync because there's no contention (single-writer
+// SQLite, single in-flight export per user gesture) and tokio::fs would
+// only add wakeup overhead.
+#[tauri::command]
+async fn notebook_export_json_to_path(
+    db: tauri::State<'_, notebook::DbHandle>,
+    path: String,
+) -> Result<usize, CmdError> {
+    let conn = db.lock().await;
+    Ok(notebook::export_to_path(&conn, std::path::Path::new(&path))?)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // app_data_dir lands under %APPDATA%/dev.lyriclens.desktop on
             // Windows. We create the directory eagerly because the user's
@@ -134,6 +149,7 @@ pub fn run() {
             notebook_upsert,
             notebook_list,
             notebook_remove,
+            notebook_export_json_to_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

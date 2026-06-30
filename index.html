@@ -429,7 +429,10 @@
             <div class="section-title">收藏的卡片</div>
             <div class="notebook-toolbar">
               <span class="notebook-count" id="notebook-count">—</span>
-              <button id="btn-notebook-refresh" type="button">刷新</button>
+              <div class="notebook-toolbar-actions">
+                <button id="btn-notebook-refresh" type="button">刷新</button>
+                <button id="btn-notebook-export-json" type="button">导出 JSON</button>
+              </div>
             </div>
             <div id="notebook-batch-bar" class="notebook-batch-bar" role="region" aria-label="批量操作"></div>
             <div id="notebook-list" class="notebook-list">
@@ -443,7 +446,7 @@
         </div>
       </section>
 
-      <div class="save-toast" id="save-toast">已保存 · <span id="save-toast-time">--:--</span></div>
+      <div class="save-toast" id="save-toast"></div>
 
       <!-- ═══ note-edit sheet ════════════════════════════════════
            Floats above settings-overlay; opened from a notebook entry's
