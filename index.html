@@ -71,6 +71,7 @@
           <button class="settings-tab is-active" data-tab="general" role="tab" type="button">常规</button>
           <button class="settings-tab" data-tab="ai" role="tab" type="button">AI 服务</button>
           <button class="settings-tab" data-tab="advanced" role="tab" type="button">高级</button>
+          <button class="settings-tab" data-tab="notebook" role="tab" type="button">笔记本</button>
           <button class="settings-tab" data-tab="debug" role="tab" type="button">调试</button>
           <button class="settings-tab" data-tab="about" role="tab" type="button">关于</button>
         </div>
@@ -286,6 +287,36 @@
                 <input type="number" id="cfg-fb-tokens" min="256" max="16000" step="64" />
               </div>
             </section>
+
+            <section class="settings-section">
+              <div class="section-title">分析缓存</div>
+              <div class="setting-row">
+                <div class="setting-copy">
+                  <strong>当前缓存条目</strong>
+                  <span id="cache-stats">—</span>
+                </div>
+                <button id="btn-cache-clear" type="button">清空</button>
+              </div>
+              <p class="field-help" style="margin-top: var(--space-2);">缓存按"歌曲 + 当前设置"匹配，命中时卡片右上角显示 <span class="mono">cached</span>。清空后下次播放会重新调用 LLM。</p>
+            </section>
+          </div>
+
+          <!-- ─── 笔记本 ───────────────────────────────────────── -->
+          <div class="tab-panel" data-tab="notebook">
+            <section class="settings-section">
+              <div class="section-title">收藏的卡片</div>
+              <div class="notebook-toolbar">
+                <span class="notebook-count" id="notebook-count">—</span>
+                <button id="btn-notebook-refresh" type="button">刷新</button>
+              </div>
+              <div id="notebook-list" class="notebook-list">
+                <p class="placeholder">尚未加载…</p>
+              </div>
+            </section>
+            <section class="settings-section">
+              <div class="section-title">关于笔记本</div>
+              <p class="about-copy">在歌词卡片右上角点 ★ 把整张卡片存进来。每行歌词唯一一条记录，再次点击同行会同步最新卡片快照（id 和首次收藏时间保留）。导入 / 导出 Anki 等功能在后续版本上线。</p>
+            </section>
           </div>
 
           <!-- ─── 调试 ─────────────────────────────────────────── -->
@@ -359,6 +390,23 @@
               </div>
               <p class="about-copy">桌面端的自动更新通道尚未上线。每次发版可在 GitHub Releases 手动下载。</p>
             </section>
+
+            <section class="settings-section">
+              <div class="section-title">数据来源 · 致谢</div>
+              <div class="kv-row">
+                <span class="kv-key">歌词</span>
+                <a class="kv-val link" href="https://lrclib.net" data-external>lrclib.net</a>
+              </div>
+              <div class="kv-row">
+                <span class="kv-key">访问方式</span>
+                <span class="kv-val mono">lrclib.yoru-and-akari.dev</span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-key">许可</span>
+                <span class="kv-val">CC0 1.0 · 开放歌词数据</span>
+              </div>
+              <p class="about-copy" style="margin-top: var(--space-2);">桌面端通过自建的 Cloudflare Worker 反代访问 lrclib.net，方便国内网络可达。所有歌词数据归原始上游 lrclib.net 所有，遵循上游 CC0 协议自由使用。</p>
+            </section>
           </div>
         </div>
 
@@ -370,6 +418,39 @@
       </section>
 
       <div class="save-toast" id="save-toast">已保存 · <span id="save-toast-time">--:--</span></div>
+
+      <!-- ═══ note-edit sheet ════════════════════════════════════
+           Floats above settings-overlay; opened from a notebook entry's
+           edit button, closed by ESC / cancel / overlay click. -->
+      <section class="note-sheet" id="note-sheet" aria-hidden="true" role="dialog" aria-labelledby="note-sheet-title">
+        <div class="note-sheet-backdrop" data-note-sheet-close></div>
+        <div class="note-sheet-panel" role="document">
+          <header class="note-sheet-head">
+            <div class="note-sheet-titles">
+              <div class="note-sheet-title" id="note-sheet-title">编辑备注</div>
+              <div class="note-sheet-sub" id="note-sheet-sub">—</div>
+            </div>
+            <button class="icon close-btn" id="btn-note-sheet-close" type="button" title="关闭" aria-label="关闭" data-note-sheet-close>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </header>
+          <div class="note-sheet-body">
+            <div class="note-sheet-line" id="note-sheet-line">—</div>
+            <div class="field">
+              <label for="note-sheet-textarea">备注</label>
+              <textarea id="note-sheet-textarea" maxlength="4000" placeholder="自由写一点心得、汉字注音、文化背景…会跟着这条收藏一起 export 到 Anki。" spellcheck="false"></textarea>
+              <div class="field-meta">
+                <span id="note-sheet-status" class="test-status">—</span>
+                <span><span id="note-sheet-count">0</span> / 4000</span>
+              </div>
+            </div>
+          </div>
+          <div class="note-sheet-footer">
+            <button id="btn-note-sheet-cancel" type="button" data-note-sheet-close>取消</button>
+            <button id="btn-note-sheet-save" class="primary" type="button">保存</button>
+          </div>
+        </div>
+      </section>
     </main>
   </body>
 </html>

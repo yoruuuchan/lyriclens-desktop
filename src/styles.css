@@ -395,6 +395,77 @@ body {
   color: var(--primary-700);
 }
 
+/* ─── card head right cluster (star + status badge) ─────────── */
+
+.analysis-head-right {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Star button — circular, transparent at rest, ember when on.
+   Sits to the LEFT of the status badge inside .analysis-head-right. */
+.star-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-spring);
+}
+
+.star-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  transition:
+    fill var(--dur-fast) var(--ease-out),
+    stroke var(--dur-fast) var(--ease-out);
+}
+
+.star-btn:hover {
+  background: var(--bg-tint);
+  color: var(--ember-500);
+  transform: scale(1.08);
+}
+
+.star-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.star-btn:disabled {
+  opacity: 0.45;
+  cursor: progress;
+  transform: none;
+}
+
+.star-btn.is-on {
+  color: var(--ember-500);
+}
+
+.star-btn.is-on svg {
+  fill: var(--ember-500);
+}
+
+.star-btn.is-on:hover {
+  color: var(--ember-700);
+}
+
+.star-btn.is-on:hover svg {
+  fill: var(--ember-700);
+}
+
 .translation-block {
   padding: var(--space-3);
   border-radius: var(--radius-md);
@@ -1360,4 +1431,254 @@ button.primary:active { box-shadow: inset 2px 2px 4px rgba(0, 0, 0, 0.18); }
   color: var(--ink-3);
   border-color: var(--line-2);
   background: transparent;
+}
+
+/* ============================================================
+   Notebook tab
+   ============================================================ */
+
+.notebook-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line-1);
+}
+
+.notebook-count {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+}
+
+.notebook-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.notebook-entry {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-flat);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.notebook-entry-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.notebook-entry-song {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.notebook-entry-song strong {
+  font-size: var(--text-base);
+  color: var(--ink-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notebook-entry-song span {
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+}
+
+.notebook-entry-time {
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+}
+
+.notebook-entry-line {
+  font-family: var(--font-jp);
+  font-size: var(--text-md);
+  color: var(--ink-1);
+  line-height: var(--leading-snug);
+}
+
+.notebook-entry-translation {
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  box-shadow: var(--shadow-inset);
+  line-height: var(--leading-snug);
+}
+
+.notebook-entry-note {
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+  line-height: var(--leading-snug);
+  white-space: pre-wrap;
+}
+
+.notebook-entry-note.muted {
+  color: var(--ink-4);
+  font-style: italic;
+}
+
+.notebook-entry-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line-1);
+}
+
+.notebook-entry-stamp {
+  font-size: var(--text-2xs);
+  color: var(--ink-3);
+}
+
+.notebook-entry-actions {
+  display: inline-flex;
+  gap: var(--space-2);
+}
+
+.notebook-entry-actions button {
+  font-size: var(--text-xs);
+  padding: 4px var(--space-2);
+}
+
+.notebook-entry-actions button.danger {
+  color: var(--error-500);
+}
+
+.notebook-entry-actions button.danger:hover {
+  color: var(--error-700);
+}
+
+/* ============================================================
+   Note-edit sheet (floats above settings overlay)
+   ============================================================ */
+
+.note-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.note-sheet.open {
+  display: flex;
+  animation: note-sheet-enter var(--dur-base) var(--ease-out);
+}
+
+@keyframes note-sheet-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.note-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 12, 24, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.note-sheet-panel {
+  position: relative;
+  z-index: 1;
+  width: min(440px, calc(100% - var(--space-4)));
+  max-height: 80vh;
+  margin-bottom: var(--space-4);
+  background: var(--bg-elevated);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-md) var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: note-sheet-slide var(--dur-base) var(--ease-spring);
+}
+
+@keyframes note-sheet-slide {
+  from {
+    transform: translateY(40px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.note-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line-1);
+}
+
+.note-sheet-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.note-sheet-title {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-1);
+}
+
+.note-sheet-sub {
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.note-sheet-body {
+  padding: var(--space-3) var(--space-4);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.note-sheet-line {
+  font-family: var(--font-jp);
+  font-size: var(--text-md);
+  color: var(--ink-1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  box-shadow: var(--shadow-inset);
+  line-height: var(--leading-snug);
+}
+
+.note-sheet-body .field textarea {
+  min-height: 120px;
+  max-height: 240px;
+  resize: vertical;
+}
+
+.note-sheet-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--line-1);
 }

@@ -18,7 +18,20 @@ import {
   type ResponseFormatMode,
   type ThinkingMode,
 } from "./analysis";
-import { readAnalysisCache, writeAnalysisCache } from "./analysis-cache";
+import {
+  clearAnalysisCache,
+  countAnalysisCacheEntries,
+  readAnalysisCache,
+  writeAnalysisCache,
+} from "./analysis-cache";
+import {
+  listEntries,
+  makeSongKey,
+  newEntryId,
+  removeEntry,
+  saveEntry,
+  type NotebookEntry,
+} from "./notebook";
 
 const APP_VERSION = "0.1.0";
 const FEEDBACK_URL = "https://lyriclens.yoru-and-akari.dev/feedback";
@@ -329,6 +342,22 @@ const el = {
   // debug
   debugCurrent: () => $("#debug-current"),
   debugAllSessions: () => $("#debug-all-sessions"),
+  // notebook
+  notebookCount: () => $("#notebook-count"),
+  notebookList: () => $("#notebook-list"),
+  notebookRefresh: () => $<HTMLButtonElement>("#btn-notebook-refresh"),
+  // analysis cache
+  cacheStats: () => $("#cache-stats"),
+  cacheClear: () => $<HTMLButtonElement>("#btn-cache-clear"),
+  // note-edit sheet
+  noteSheet: () => $("#note-sheet"),
+  noteSheetTitle: () => $("#note-sheet-title"),
+  noteSheetSub: () => $("#note-sheet-sub"),
+  noteSheetLine: () => $("#note-sheet-line"),
+  noteSheetTextarea: () => $<HTMLTextAreaElement>("#note-sheet-textarea"),
+  noteSheetStatus: () => $("#note-sheet-status"),
+  noteSheetCount: () => $("#note-sheet-count"),
+  noteSheetSave: () => $<HTMLButtonElement>("#btn-note-sheet-save"),
 };
 
 // ─── state ───────────────────────────────────────────────────
@@ -386,6 +415,26 @@ const state = {
   // context, no point in carrying the freeze over.
   followPaused: false,
   frozenActiveIdx: -1,
+  // Keyed by `${songKey}:${lineIndex}` — the same business key the
+  // Rust side enforces with UNIQUE. Loaded once at boot and kept in
+  // sync by toggleStarForLine / refreshNotebookEntries; the notebook
+  // tab also reuses this map instead of refetching every render.
+  notebook: {
+    entries: new Map<string, NotebookEntry>(),
+    loaded: false,
+    lastError: "",
+  },
+  // The note-edit sheet floats above settings overlay; when open it
+  // captures focus and Escape. entryId tracks which entry we're editing
+  // so save knows where to write.
+  noteSheet: {
+    open: false,
+    entryId: "",
+  },
+  // True only while a star/unstar request is in flight, so the UI can
+  // disable the star button and avoid double-fires.
+  starBusy: new Set<number>(),
+  notebookPanelOpen: false,
 };
 
 const SNAPSHOT_WINDOW = 5;
@@ -548,6 +597,101 @@ const POINT_TYPE_LABELS: Record<AnalysisCard["points"][number]["type"], string> 
   general: "补充",
 };
 
+// Business key that joins lyric line to NotebookEntry, mirroring the
+// UNIQUE(song_key, line_index) constraint on the Rust side. Anywhere
+// we need "is this line starred for the current song?" goes through
+// here so we never accidentally desync the index.
+function notebookKey(songKey: string, lineIndex: number): string {
+  return `${songKey}:${lineIndex}`;
+}
+
+// Schema-canonical song key — trim+lowercase title/artist + rounded
+// duration. main.ts also has trackKey() which intentionally skips trim
+// (so the existing analysis-cache keys stay stable); the two converge
+// when SMTC already returns trimmed metadata, which is the common case.
+function currentSongKey(np: NowPlaying | null): string {
+  if (!np?.title || !np.artist) return "";
+  return makeSongKey(np.title, np.artist, np.durationMs);
+}
+
+function findEntryForLine(lineIndex: number): NotebookEntry | undefined {
+  const songKey = currentSongKey(state.np);
+  if (!songKey) return undefined;
+  return state.notebook.entries.get(notebookKey(songKey, lineIndex));
+}
+
+async function loadNotebookEntries(): Promise<void> {
+  try {
+    const entries = await listEntries();
+    state.notebook.entries.clear();
+    for (const entry of entries) {
+      state.notebook.entries.set(
+        notebookKey(entry.songKey, entry.lineIndex),
+        entry,
+      );
+    }
+    state.notebook.loaded = true;
+    state.notebook.lastError = "";
+  } catch (err) {
+    state.notebook.lastError =
+      (err as { message?: string })?.message || String(err);
+    console.warn("notebook list failed", err);
+  }
+}
+
+async function toggleStarForLine(lineIndex: number): Promise<void> {
+  const np = state.np;
+  const card = state.analysis.cards.get(lineIndex);
+  if (!np || !card) return;
+  const songKey = currentSongKey(np);
+  if (!songKey) return;
+  if (state.starBusy.has(lineIndex)) return;
+  state.starBusy.add(lineIndex);
+  // Force re-render so the disabled state shows up immediately.
+  state.lastLyricsHtml = "";
+  renderLyrics();
+
+  try {
+    const key = notebookKey(songKey, lineIndex);
+    const existing = state.notebook.entries.get(key);
+    if (existing) {
+      const removed = await removeEntry(existing.id);
+      if (removed) state.notebook.entries.delete(key);
+    } else {
+      const now = Date.now();
+      const lineText = state.lines[lineIndex]?.text?.trim()
+        || card.original.trim()
+        || "♪";
+      const entry: NotebookEntry = {
+        id: newEntryId(),
+        songKey,
+        songTitle: np.title.trim() || np.title,
+        songArtist: np.artist.trim() || np.artist,
+        lineIndex,
+        lineText,
+        card,
+        userNote: "",
+        starredAt: now,
+        updatedAt: now,
+        source: "desktop",
+      };
+      const stored = await saveEntry(entry);
+      state.notebook.entries.set(key, stored);
+    }
+  } catch (err) {
+    const msg = (err as { message?: string })?.message || String(err);
+    state.notebook.lastError = msg;
+    console.warn("notebook toggle failed", err);
+  } finally {
+    state.starBusy.delete(lineIndex);
+    state.lastLyricsHtml = "";
+    renderLyrics();
+    // If the notebook panel is open, refresh it so the new/removed
+    // entry shows up without the user having to reopen the tab.
+    if (state.notebookPanelOpen) renderNotebookPanel();
+  }
+}
+
 function resetAnalysis(trackKeyValue = "") {
   state.analysis.controller?.abort();
   state.analysis.trackKey = trackKeyValue;
@@ -570,6 +714,20 @@ function renderAnalysisCard(card: AnalysisCard): string {
   const badgeClass = state.analysis.fromCache
     ? "analysis-status is-cached"
     : "analysis-status";
+  const isStarred = !!findEntryForLine(card.lineIndex);
+  const isBusy = state.starBusy.has(card.lineIndex);
+  // SVG: outlined star at rest, filled when on. CSS swaps fill via the
+  // `.is-on` class so we only ship one path.
+  const starBtn = `<button type="button" class="star-btn${isStarred ? " is-on" : ""}"
+      data-star-line="${card.lineIndex}"
+      aria-pressed="${isStarred ? "true" : "false"}"
+      aria-label="${isStarred ? "取消收藏到笔记本" : "收藏到笔记本"}"
+      title="${isStarred ? "已收藏 · 点击取消" : "收藏到笔记本"}"
+      ${isBusy ? "disabled" : ""}>
+      <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polygon points="12 2.5 14.94 8.86 21.95 9.74 16.78 14.55 18.18 21.5 12 17.97 5.82 21.5 7.22 14.55 2.05 9.74 9.06 8.86 12 2.5"/>
+      </svg>
+    </button>`;
   const translation = card.translation.trim()
     ? `<div class="translation-block">
         <span class="translation-label">translation</span>
@@ -595,12 +753,186 @@ function renderAnalysisCard(card: AnalysisCard): string {
         <span class="analysis-dot" aria-hidden="true"></span>
         <span class="analysis-title">analysis${time}</span>
       </div>
-      <span class="${badgeClass}">${statusBadge}</span>
+      <div class="analysis-head-right">
+        ${starBtn}
+        <span class="${badgeClass}">${statusBadge}</span>
+      </div>
     </div>
     ${translation}
     ${points ? `<div class="point-list">${points}</div>` : ""}
     ${note}
   </article>`;
+}
+
+function fmtTimestamp(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "—";
+  const d = new Date(ms);
+  const yyyy = d.getFullYear();
+  const mo = (d.getMonth() + 1).toString().padStart(2, "0");
+  const dd = d.getDate().toString().padStart(2, "0");
+  const hh = d.getHours().toString().padStart(2, "0");
+  const mm = d.getMinutes().toString().padStart(2, "0");
+  return `${yyyy}-${mo}-${dd} ${hh}:${mm}`;
+}
+
+function renderNotebookEntry(entry: NotebookEntry): string {
+  const time =
+    typeof entry.card.startMs === "number" && entry.card.startMs >= 0
+      ? formatTime(entry.card.startMs)
+      : "—";
+  const translation = entry.card.translation.trim()
+    ? `<div class="notebook-entry-translation">${escapeHtml(entry.card.translation)}</div>`
+    : "";
+  const note = entry.userNote.trim()
+    ? `<div class="notebook-entry-note">${escapeHtml(entry.userNote)}</div>`
+    : `<div class="notebook-entry-note muted">尚无备注</div>`;
+  return `<article class="notebook-entry" data-entry-id="${escapeHtml(entry.id)}">
+    <header class="notebook-entry-head">
+      <div class="notebook-entry-song">
+        <strong>${escapeHtml(entry.songTitle)}</strong>
+        <span>${escapeHtml(entry.songArtist)}</span>
+      </div>
+      <span class="notebook-entry-time mono">${time}</span>
+    </header>
+    <div class="notebook-entry-line">${escapeHtml(entry.lineText)}</div>
+    ${translation}
+    ${note}
+    <footer class="notebook-entry-foot">
+      <span class="notebook-entry-stamp mono">${fmtTimestamp(entry.starredAt)}</span>
+      <div class="notebook-entry-actions">
+        <button type="button" data-edit-entry="${escapeHtml(entry.id)}">编辑备注</button>
+        <button type="button" class="danger" data-remove-entry="${escapeHtml(entry.id)}">删除</button>
+      </div>
+    </footer>
+  </article>`;
+}
+
+function renderNotebookPanel(): void {
+  const listEl = el.notebookList();
+  const countEl = el.notebookCount();
+  if (!listEl || !countEl) return;
+  const total = state.notebook.entries.size;
+  if (state.notebook.lastError && total === 0) {
+    countEl.textContent = "加载失败";
+    listEl.innerHTML = `<p class="placeholder">读取笔记本失败 · ${escapeHtml(state.notebook.lastError)}</p>`;
+    return;
+  }
+  countEl.textContent = total === 0 ? "尚无收藏" : `共 ${total} 条`;
+  if (total === 0) {
+    listEl.innerHTML = `<p class="placeholder">在歌词卡片右上角点 ★ 收藏第一张。</p>`;
+    return;
+  }
+  // Sort by starredAt desc (most recent first) — the Rust list() returns
+  // them already sorted, but using the in-memory map means we have to
+  // sort here regardless.
+  const sorted = Array.from(state.notebook.entries.values()).sort(
+    (a, b) => b.starredAt - a.starredAt,
+  );
+  listEl.innerHTML = sorted.map(renderNotebookEntry).join("");
+}
+
+function updateCacheStats(): void {
+  const stats = el.cacheStats();
+  if (!stats) return;
+  const count = countAnalysisCacheEntries();
+  stats.textContent = count === 0 ? "尚无缓存" : `${count} 首歌`;
+}
+
+function openNoteSheet(entryId: string): void {
+  const entry = Array.from(state.notebook.entries.values()).find(
+    (e) => e.id === entryId,
+  );
+  if (!entry) return;
+  state.noteSheet.open = true;
+  state.noteSheet.entryId = entryId;
+  const sheet = el.noteSheet();
+  if (!sheet) return;
+  sheet.setAttribute("aria-hidden", "false");
+  sheet.classList.add("open");
+  el.noteSheetSub().textContent = `${entry.songTitle} · ${entry.songArtist}`;
+  el.noteSheetLine().textContent = entry.lineText;
+  const ta = el.noteSheetTextarea();
+  ta.value = entry.userNote;
+  el.noteSheetCount().textContent = String(entry.userNote.length);
+  el.noteSheetStatus().textContent = "未保存";
+  el.noteSheetStatus().className = "test-status pending";
+  // Focus after the next frame so the sheet's transition lands first.
+  requestAnimationFrame(() => ta.focus());
+}
+
+function closeNoteSheet(): void {
+  state.noteSheet.open = false;
+  state.noteSheet.entryId = "";
+  const sheet = el.noteSheet();
+  if (!sheet) return;
+  sheet.setAttribute("aria-hidden", "true");
+  sheet.classList.remove("open");
+}
+
+async function saveNoteSheet(): Promise<void> {
+  const entryId = state.noteSheet.entryId;
+  if (!entryId) return;
+  const entry = Array.from(state.notebook.entries.values()).find(
+    (e) => e.id === entryId,
+  );
+  if (!entry) return;
+  const ta = el.noteSheetTextarea();
+  const nextNote = ta.value;
+  const now = Date.now();
+  const updated: NotebookEntry = {
+    ...entry,
+    userNote: nextNote,
+    updatedAt: now,
+  };
+  const status = el.noteSheetStatus();
+  const saveBtn = el.noteSheetSave();
+  saveBtn.disabled = true;
+  status.textContent = "保存中…";
+  status.className = "test-status pending";
+  try {
+    const stored = await saveEntry(updated);
+    state.notebook.entries.set(
+      notebookKey(stored.songKey, stored.lineIndex),
+      stored,
+    );
+    if (state.notebookPanelOpen) renderNotebookPanel();
+    status.textContent = "已保存";
+    status.className = "test-status ok";
+    // Auto-dismiss the sheet after a beat so the success is visible.
+    setTimeout(closeNoteSheet, 350);
+  } catch (err) {
+    const msg = (err as { message?: string })?.message || String(err);
+    status.textContent = `失败 · ${msg}`;
+    status.className = "test-status err";
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
+async function removeNotebookEntry(entryId: string): Promise<void> {
+  const entry = Array.from(state.notebook.entries.values()).find(
+    (e) => e.id === entryId,
+  );
+  if (!entry) return;
+  const ok = window.confirm(
+    `删除「${entry.songTitle} · ${entry.songArtist}」的这条收藏？`,
+  );
+  if (!ok) return;
+  try {
+    const removed = await removeEntry(entryId);
+    if (removed) {
+      state.notebook.entries.delete(
+        notebookKey(entry.songKey, entry.lineIndex),
+      );
+      renderNotebookPanel();
+      // The lyric view shows star state from the same map — re-render
+      // so the previously-starred line goes back to a hollow icon.
+      state.lastLyricsHtml = "";
+      renderLyrics();
+    }
+  } catch (err) {
+    console.warn("notebook remove failed", err);
+  }
 }
 
 function renderAnalysisSlot(lineIndex: number): string {
@@ -1164,7 +1496,11 @@ function closeSettings() {
   // Stop paying for smtc_all_sessions when nobody's looking, and drop
   // the per-session snapshot buffers so they don't grow unbounded.
   state.debugPanelOpen = false;
+  state.notebookPanelOpen = false;
   allSessionSnapshots.clear();
+  // The note-edit sheet floats above the overlay; closing settings
+  // should dismiss it too so reopening doesn't surface a stale entry.
+  closeNoteSheet();
 }
 
 function switchTab(name: string) {
@@ -1183,6 +1519,20 @@ function switchTab(name: string) {
     // Trigger an immediate fetch so the panel doesn't sit empty for up
     // to a second waiting for the next pollSmtc tick.
     void pollSmtc();
+  }
+  state.notebookPanelOpen = name === "notebook";
+  if (state.notebookPanelOpen) {
+    // Always refetch on tab open — entries can change from any star
+    // click on the lyric side, and the cost is one SQLite query.
+    void (async () => {
+      await loadNotebookEntries();
+      renderNotebookPanel();
+    })();
+  }
+  if (name === "advanced") {
+    // Refresh the cache stats line every time the user comes back to
+    // this tab — values change whenever a song finishes analyzing.
+    updateCacheStats();
   }
 }
 
@@ -1669,6 +2019,62 @@ function bindSettingsForm() {
   });
   el.testBtn().addEventListener("click", testConnection);
   el.fbSend().addEventListener("click", sendFeedback);
+
+  // Cache clear button — confirmation lives in window.confirm so we
+  // don't need a custom modal for what is a rare, irreversible action.
+  el.cacheClear().addEventListener("click", () => {
+    const count = countAnalysisCacheEntries();
+    if (count === 0) return;
+    if (!window.confirm(`确认清空 ${count} 首歌的分析缓存？下次播放需要重新调用 LLM。`)) {
+      return;
+    }
+    clearAnalysisCache();
+    updateCacheStats();
+  });
+
+  // Notebook tab — refresh on demand; the entry list also delegates
+  // clicks for the edit / remove buttons each entry exposes.
+  el.notebookRefresh().addEventListener("click", () => {
+    void (async () => {
+      await loadNotebookEntries();
+      renderNotebookPanel();
+    })();
+  });
+  el.notebookList().addEventListener("click", (event) => {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    const editId = target
+      .closest<HTMLElement>("[data-edit-entry]")
+      ?.dataset.editEntry;
+    if (editId) {
+      openNoteSheet(editId);
+      return;
+    }
+    const removeId = target
+      .closest<HTMLElement>("[data-remove-entry]")
+      ?.dataset.removeEntry;
+    if (removeId) {
+      void removeNotebookEntry(removeId);
+    }
+  });
+
+  // Note-edit sheet bindings — every dismiss path (×, cancel, backdrop)
+  // shares the same close handler via data-note-sheet-close.
+  document
+    .querySelectorAll<HTMLElement>("[data-note-sheet-close]")
+    .forEach((node) => node.addEventListener("click", closeNoteSheet));
+  el.noteSheetTextarea().addEventListener("input", () => {
+    const v = el.noteSheetTextarea().value;
+    el.noteSheetCount().textContent = String(v.length);
+    el.noteSheetStatus().textContent = "未保存";
+    el.noteSheetStatus().className = "test-status pending";
+  });
+  el.noteSheetSave().addEventListener("click", () => void saveNoteSheet());
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.noteSheet.open) {
+      closeNoteSheet();
+    }
+  });
 }
 
 // ─── boot ────────────────────────────────────────────────────
@@ -1746,6 +2152,23 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   el.settingsBtn().addEventListener("click", openSettings);
 
+  // Single delegated handler for every star button in the lyric list.
+  // Re-renders bin the buttons every tick, so per-button addEventListener
+  // would leak handlers; one listener on the container survives forever.
+  el.lyrics().addEventListener("click", (event) => {
+    const target = (event.target as HTMLElement | null)?.closest<HTMLElement>(
+      "[data-star-line]",
+    );
+    if (!target) return;
+    const lineIndex = Number(target.dataset.starLine);
+    if (!Number.isFinite(lineIndex)) return;
+    void toggleStarForLine(lineIndex);
+  });
+
   bindSettingsForm();
   startLoops();
+  // Notebook entries hydrate asynchronously — the lyric view will
+  // re-render once the first star event fires, and renderNotebookPanel
+  // pulls from the live state.notebook.entries map.
+  void loadNotebookEntries();
 });
