@@ -13,6 +13,54 @@ tags: `[plan]` route decision / `[ship]` shipped functionality / `[probe]` probe
 
 ---
 
+## 2026-07-01 [ship] 阶段 3 完整闭环 — JSON export + Anki TSV + JSON import + 旧债收敛
+
+桌面版第四个连续 session 收工。3 条 PR ship 到 main + 1 条本地 commit 待下窗口 push，阶段 3 的对外通路（导入 / 导出 JSON 给安卓单词本 app / 导出 Anki TSV 给复习闭环）全部就位。Yoru 真机逐 PR 验过。
+
+PR 列表（时间序）：
+
+- **[#24](https://github.com/yoruuuchan/lyriclens-desktop/pull/24) feat(notebook): JSON 导出 — v1 schema envelope + save dialog** —— 阶段 3 第 4 步 export 半
+  - `notebook::build_export_payload` + `export_to_path`；`NotebookError::Io` 新变种；新 invoke `notebook_export_json_to_path`
+  - 顶层结构按 schema 文档：`schema` / `exportedAt` (RFC3339 chrono::Utc) / `exportedFrom` / `entries`
+  - 新依赖 `tauri-plugin-dialog` (Rust+JS) + `chrono`；capability `dialog:default`
+  - 顺手把 `showSavedToast` 重写成 generic `showToast(message)` wrapper，清掉 `#save-toast-time` 死 DOM
+  - 这条最高优先级提前到 🥇 — 安卓 LyricLens 移动复习器 MVP 第一天就要消费这份 JSON
+
+- **[#25](https://github.com/yoruuuchan/lyriclens-desktop/pull/25) feat(notebook): Anki TSV 导出 — Front/Back/Tags per schema doc** —— 阶段 3 第 3 步
+  - 一条 NotebookEntry → 一张 Anki 卡片：Front `<title> — <artist><br><lineText>`，Back `translation` + 空行 + `<label>: <text>` 每 point + 空行 + LLM note + 空行 + `---` + userNote
+  - 空段（无 points / note / userNote）整段跳过，不留游离 `---` 或多余空行
+  - Tag 折叠 songKey 里 `|` 和空格为 `_`（Anki 按空格分 tag）；字段内 `\n→<br>`、`\t→空格`
+  - `label_of` 中文映射：vocabulary→词汇 / grammar→语法 / culture→文化背景 / pronunciation→发音 / tone→语感 / general→补充 / unknown→其他
+  - 前端 `exportNotebookJson` 重构为参数化 `exportNotebookAs(format)`，JSON/Anki 共用 dialog + toast 流
+
+- **[#26](https://github.com/yoruuuchan/lyriclens-desktop/pull/26) feat(notebook): JSON 导入 + 七步合并规则** —— 阶段 3 第 4 步 import 半
+  - 按主仓库 schema 文档 §"合并规则" 逐字实现：id 保留 / userNote 拼 marker / card 取新 / starredAt 取早 / updatedAt = 本次 import / importMergedFrom 追加 dedup / source 不变
+  - "跳过整条" 判定三条 AND：incoming.userNote 非空 + local 已含 `---来自 <source>（` marker + local 已含 incoming.userNote 完整字符串（比单看 marker 头更稳，避免用户手写"---来自"误判）
+  - 不能用 `upsert` —— 它的 ON CONFLICT 保留 starred_at、覆盖 user_note，跟合并规则反着；专门加 `replace_full` (INSERT OR REPLACE) 给 import 用，upsert 继续服务 star 路径
+  - schema 字段不是 `lyriclens.notebook.v1` 硬报错，不"尽力解析"
+  - 整批 import 一个事务，单条校验失败计 skipped 不打断
+  - 9 个新 Rust 测试 → notebook 模块 **21 测试全过**
+  - Yoru 真机三步验过：第 1 次 import 新+1，第 2 次 合并+1（userNote 拼接），第 3 次 跳过+1
+
+- **PR B (本地 commit `7b199c8`，分支 `chore/track-key-canonical-sync`，未 push)** chore(notebook): trackKey 收敛到 schema-canonical makeSongKey
+  - 旧 `trackKey()` 不带 trim，schema-canonical 的 `makeSongKey()` 带 trim；divergent on edge-whitespace metadata（实测罕见但理论存在）
+  - PR：`trackKey()` 直接调 `makeSongKey()`；删 session 3 加的重复函数 `currentSongKey()`，2 处调用合并到 trackKey
+  - `analysis-cache.ts` `CACHE_VERSION 2 → 3` 让旧 entries 自动失效，避免静默 miss-then-rewrite 浪费 token
+  - 已跟 Yoru plan 确认接受一次性 LLM 重算成本
+  - 下窗口起步 30 秒 push + PR + merge
+
+附加事件：
+
+- 本 session 中段用了 plan mode (`EnterPlanMode` + `ExitPlanMode` + `AskUserQuestion`) 跟 Yoru 把剩下 3 个 🥉 打包到 `~/.claude/plans/misty-splashing-gadget.md`，拍板了 trackKey 收敛要不要做、"跳过整条" 判定的精确条件
+- `EntrySource::as_str()` helper 提取 —— 之前 upsert / anki / replace_full 三处都写 match，集中成方法
+- 测试 mod 顶部加 `#[allow(non_snake_case)]` —— 测试名字面 embed schema 字段（`userNote`/`starredAt`/`updatedAt`/`importMergedFrom`）方便跟文档对 grep
+- README 还停在 session 2 的网络根治那版，没提任何笔记本相关 — 留给下窗口的 PR C
+- 词库基建（JLPT + CF KV，独立 vertical 1-2 天）不进阶段 3 收尾，留给下个 session 整段时间投入
+
+详细 handoff 在 `HANDOFF-2026-07-01-session4.md`（gitignored，本地）。
+
+---
+
 ## 2026-07-01 [ship] 阶段 3 第 1+2 步 + 笔记本独立 overlay + 一堆 polish
 
 桌面版第三个连续 session 收工，6 条 PR 全 merged，Yoru 真机一路验过。阶段 3 主菜推完一半（第 1+2 步），笔记本从 settings tab 提升为主页右上角独立 overlay，附带踩到 worktree+junction 把 node_modules 删空的坑（已写 memory）。
