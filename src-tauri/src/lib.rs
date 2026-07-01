@@ -1,3 +1,4 @@
+mod credentials;
 mod jlpt;
 mod lrclib;
 mod notebook;
@@ -56,6 +57,12 @@ impl From<lrclib::LrcError> for CmdError {
 
 impl From<notebook::NotebookError> for CmdError {
     fn from(err: notebook::NotebookError) -> Self {
+        CmdError::Storage { message: err.to_string() }
+    }
+}
+
+impl From<credentials::CredentialsError> for CmdError {
+    fn from(err: credentials::CredentialsError) -> Self {
         CmdError::Storage { message: err.to_string() }
     }
 }
@@ -170,6 +177,30 @@ async fn jlpt_lookup(
     Ok(guard.lookup(&surface, reading.as_deref()))
 }
 
+// Credentials live in a JSON file (not localStorage) so they survive
+// origin changes — dev port moves, dev vs release scheme switches.
+// See credentials.rs for the full why.
+#[tauri::command]
+async fn credentials_read(app: tauri::AppHandle) -> Result<credentials::Credentials, CmdError> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| CmdError::Storage { message: e.to_string() })?;
+    Ok(credentials::read(&dir)?)
+}
+
+#[tauri::command]
+async fn credentials_write(
+    app: tauri::AppHandle,
+    creds: credentials::Credentials,
+) -> Result<(), CmdError> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| CmdError::Storage { message: e.to_string() })?;
+    Ok(credentials::write(&dir, &creds)?)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -221,6 +252,8 @@ pub fn run() {
             notebook_export_anki_to_path,
             notebook_import_from_path,
             jlpt_lookup,
+            credentials_read,
+            credentials_write,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

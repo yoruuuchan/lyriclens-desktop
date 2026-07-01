@@ -12,14 +12,22 @@ export default defineConfig(async () => ({
   clearScreen: false,
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
-    port: 1420,
+    // 5173 is vite's default. We used to sit on 1420 (the Tauri
+    // scaffold's suggestion) but Windows dynamically reserves
+    // ranges around it for Hyper-V / WSL NAT once those services
+    // are enabled — a `tauri dev` boot then errors out with
+    // `EACCES: permission denied 127.0.0.1:1420` even though
+    // netstat shows nothing on the port. 5173 sits outside every
+    // range Windows currently reserves on this box, and matches
+    // what most Vite tutorials assume.
+    port: 5173,
     strictPort: true,
     host: host || "127.0.0.1",
     hmr: host
       ? {
           protocol: "ws",
           host,
-          port: 1421,
+          port: 5174,
         }
       : undefined,
     watch: {

@@ -68,7 +68,7 @@ npm run tauri dev        # dev server + hot-reload webview
 npm run tauri build      # release .msi at src-tauri/target/release/bundle/msi/
 ```
 
-In-app debugging: press **F12** or **Ctrl + Shift + I** for the webview devtools (debug builds enable them by default). The Vite dev server pins port 1420 — if a previous instance crashed and left the port held, `Get-NetTCPConnection -LocalPort 1420 | Stop-Process` clears it.
+In-app debugging: press **F12** or **Ctrl + Shift + I** for the webview devtools (debug builds enable them by default). The Vite dev server pins port 5173 (older docs called out 1420, but that port falls inside the Windows Hyper-V / WSL excluded range on this box, which surfaces as an `EACCES` bind failure on `tauri dev`) — if a previous instance crashed and left the port held, `Get-NetTCPConnection -LocalPort 5173 | Stop-Process` clears it.
 
 ## Repository layout
 
