@@ -13,6 +13,35 @@ tags: `[plan]` route decision / `[ship]` shipped functionality / `[probe]` probe
 
 ---
 
+## 2026-07-02 [ship] session 5 存货清仓 + credentials 持久化 + 英语词库设计定稿
+
+桌面版第六个 session。5 个 PR merge 进 main（桌面 #30/#31/#33 + 主 #16/#17），desktop main 三个 vertical 会师、51 个 Rust 测试全绿。英语考试标签 vertical 完成调研 + schema 定稿（主 #18 open）。
+
+- **[#33](https://github.com/yoruuuchan/lyriclens-desktop/pull/33) feat(settings): credentials 持久化到磁盘** —— 根治"每次更新 API key 丢"
+  - 根因：localStorage per-origin 隔离（dev `http://localhost:<port>` vs release `tauri://localhost`），换端口/换 build 必丢
+  - 新 `credentials.rs`：missing→default read + temp-file+rename 原子写 + 5 单测；`credentials_read`/`credentials_write` commands
+  - `main.ts`：saveSettings 剔凭证字段（key 从此不进 localStorage）/ 启动 hydrate + 一次性迁移 / `credentialsReady` gate 防首次分析 missing-config 竞态
+  - Yoru 真机验：credentials.json 落盘 ✓ 重启回填 ✓
+- **session 5 的 4 个 open PR 全部验收 + merge**（主 #16/#17 + 桌面 #30 JLPT / #31 mastery）
+  - JLPT：Yoru 真机验 badge + hover tooltip；preprocess dry-run 远程复验数字逐项一致
+  - 踩坑：#30/#31 base 落后 hotfix #32 → 真机撞 1420 EACCES + mojibake → merge main 进 feature branch 解决（lib.rs 3 处 + main.ts 1 处冲突，全"两边保留"型）
+  - #30 落地后 #31 变 CONFLICTING（连环 merge 要逐个重查 mergeable），本地再 merge 一轮后落地
+  - 全程 `gh pr view --json state,mergedAt` 保险确认，5 个 PR 零 silent fail
+- **英语考试标签 vertical：调研 + schema 定稿**（主 [#18](https://github.com/yoruuuchan/LyricLens/pull/18) open）
+  - 产品拍板：一期高考/CET-4/CET-6/考研，设置单选目标考试（默认 off）只显示选中体系；雅思托福二期做社区弱标签
+  - 调研模式：Claude 写 prompt → Yoru 的 GPT Plus 跑 license 审计 → Claude 核验 4 个决策级仓库 LICENSE/README 原文，零幻觉
+  - 数据实测：cet-word-list 四六级标记 OCR 全丢 + 一行多词脏行 → 双源互证方案（官方大纲 OCR 定名单 × ECDICT 定级别）
+  - 雷区写死进 schema doc：kajweb/dict 谱系（商业 App 抓取）/ mahavivo（无 license）/ Oxford/EVP（专有）；NETEM 数据 CC BY-NC-SA 只做计数校验不分发
+  - blob 只存 word + tags[]，版权面最薄；KV family `enexam/*` 复用 dicts-cdn Worker
+
+附加事件：
+
+- 本 session 主动在成果饱和点收工（vs session 5 拖到 400k 红线），节奏实验成功
+- mastery 真机四色验证留到下 session（merge 时 Yoru 拍板测试全绿直接进）
+- brotli 重跑字节数与线上差 14B（压缩器小版本差异）——不跨版本比对 blob sha，线上 manifest+blob 配套自洽即可
+
+详细 handoff 在 `HANDOFF-2026-07-02-session6.md`（gitignored，本地）。
+
 ## 2026-07-01 [ship] 阶段 3 完整闭环 — JSON export + Anki TSV + JSON import + 旧债收敛
 
 桌面版第四个连续 session 收工。4 条 PR 全 ship 到 main，阶段 3 的对外通路（导入 / 导出 JSON 给安卓单词本 app / 导出 Anki TSV 给复习闭环）全部就位。Yoru 真机逐 PR 验过。
