@@ -515,7 +515,10 @@ body {
 
 .point-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  /* Third column reserved for the optional JLPT reference-level badge —
+   * `auto` collapses to 0 when the slot renders empty (culture/tone/
+   * pronunciation points, or vocabulary/grammar without a JLPT hit). */
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: var(--space-2);
   align-items: start;
 }
@@ -566,6 +569,33 @@ body {
   color: var(--ink-2);
   font-size: var(--text-sm);
   line-height: var(--leading-normal);
+}
+
+/* JLPT reference-level badge — third column of a point-row. `outline`
+ * style visually separates it from the solid-fill point-badge (which
+ * codes the point *type*, not difficulty). Empty span until the
+ * async lookup completes; on miss the innerHTML stays empty and the
+ * grid column collapses to zero width. */
+.jlpt-badge-slot {
+  display: inline-flex;
+  align-items: center;
+  min-height: 0;
+}
+
+.jlpt-badge {
+  display: inline-block;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--primary-300);
+  background: transparent;
+  color: var(--primary-700);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1.4;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: help;
 }
 
 .analysis-note {

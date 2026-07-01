@@ -1,4 +1,5 @@
 mod credentials;
+mod jlpt;
 mod lrclib;
 mod notebook;
 mod smtc;
@@ -161,6 +162,21 @@ async fn notebook_import_from_path(
     )?)
 }
 
+// JLPT reference-level lookup for the analysis card's badge. Frontend
+// passes the point's `surface` (base form) and optional `reading` (kana);
+// Rust consults the in-memory HashMap populated at boot from the KV
+// blob. Returns [] on miss so the UI can render nothing per schema doc
+// §UI 渲染规则.
+#[tauri::command]
+async fn jlpt_lookup(
+    store: tauri::State<'_, tokio::sync::RwLock<jlpt::JlptStore>>,
+    surface: String,
+    reading: Option<String>,
+) -> Result<Vec<jlpt::JlptEntry>, CmdError> {
+    let guard = store.read().await;
+    Ok(guard.lookup(&surface, reading.as_deref()))
+}
+
 // Credentials live in a JSON file (not localStorage) so they survive
 // origin changes — dev port moves, dev vs release scheme switches.
 // See credentials.rs for the full why.
@@ -199,6 +215,29 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
             let conn = notebook::open_db(&data_dir.join("notebook.sqlite"))?;
             app.manage::<notebook::DbHandle>(tokio::sync::Mutex::new(conn));
+
+            // JLPT store: register an empty store synchronously so the
+            // `jlpt_lookup` command always has State to lock, then kick
+            // off the network bootstrap on the async runtime. First few
+            // hundred ms of app life may miss badges — the frontend
+            // re-renders on subsequent card updates and the store is
+            // hot by then. Cold cache from disk beats going to network.
+            let store = tokio::sync::RwLock::new(jlpt::JlptStore::empty());
+            app.manage::<tokio::sync::RwLock<jlpt::JlptStore>>(store);
+            let handle = app.handle().clone();
+            let bootstrap_dir = data_dir.clone();
+            tauri::async_runtime::spawn(async move {
+                let loaded = jlpt::bootstrap(&bootstrap_dir, None, None).await;
+                let state = handle.state::<tokio::sync::RwLock<jlpt::JlptStore>>();
+                let mut guard = state.write().await;
+                *guard = loaded;
+                log::info!(
+                    "jlpt: store ready, {} surfaces loaded (version={:?})",
+                    guard.entries.len(),
+                    guard.version
+                );
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -212,6 +251,7 @@ pub fn run() {
             notebook_export_json_to_path,
             notebook_export_anki_to_path,
             notebook_import_from_path,
+            jlpt_lookup,
             credentials_read,
             credentials_write,
         ])

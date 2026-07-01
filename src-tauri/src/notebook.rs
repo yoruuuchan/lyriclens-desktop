@@ -36,6 +36,14 @@ pub struct AnalysisPoint {
     #[serde(rename = "type")]
     pub kind: String,
     pub text: String,
+    // Optional surface / reading for JLPT (and future CEFR-J) badge
+    // lookup on vocabulary/grammar points. Skip when serializing so old
+    // notebook entries whose card snapshot predates this field don't
+    // get littered with `"surface": null` on export.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reading: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -809,6 +817,8 @@ mod tests {
                 points: vec![AnalysisPoint {
                     kind: "vocabulary".into(),
                     text: "眩しい: 耀眼的".into(),
+                    surface: None,
+                    reading: None,
                 }],
                 note: "".into(),
                 start_ms: Some(12_000),

@@ -22,10 +22,12 @@ const STORAGE_KEY = "lyriclens.desktop.analysis-cache";
 // now goes through the schema-canonical makeSongKey() — title/artist
 // are trim()'d before lowercasing, so any pre-existing key whose
 // metadata had stray whitespace at the edge would never hit again.
-// Bumping forces a one-time re-analysis instead of silent miss-then-
-// new-write that would leak token spend on entries the user thinks
-// are cached.
-const CACHE_VERSION = 3;
+// v4 invalidates the cards produced before the analysis prompt was
+// extended to ask for `surface` + `reading` on vocabulary/grammar
+// points (JLPT badge lookup). Old cards lack those fields, so the
+// badge silently misses on cache hits — bumping forces one round of
+// re-analysis instead of a permanent silent degradation.
+const CACHE_VERSION = 4;
 const MAX_ENTRIES = 50;
 
 type CacheEntry = {

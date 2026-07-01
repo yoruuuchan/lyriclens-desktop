@@ -1,0 +1,20 @@
+name = "dicts-cdn"
+main = "worker.js"
+compatibility_date = "2026-06-01"
+workers_dev = false
+
+# Route the Worker to the dicts subdomain of yoru-and-akari.dev. The
+# DNS record (AAAA 100:: proxied=true) is created via the API alongside
+# the first deploy — see deploy.sh.
+routes = [
+  { pattern = "dicts.yoru-and-akari.dev/*", zone_id = "4f9b5c7236e63090439676eec70031e2" }
+]
+
+# Namespace holds:
+#   jlpt/manifest.json
+#   jlpt/jlpt-levels.<version>.v1.json.br
+# Add cefrj/ family later without a code change; the Worker's allowlist
+# regex already accepts "^[a-z][a-z0-9-]{0,15}$" for the family segment.
+[[kv_namespaces]]
+binding = "LYRICLENS_DICTS"
+id = "fb04f0c85f3346bc828bda816007a342"
