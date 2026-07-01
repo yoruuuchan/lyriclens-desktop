@@ -34,6 +34,7 @@ import {
   newEntryId,
   removeEntry,
   saveEntry,
+  type MasteryLevel,
   type NotebookEntry,
 } from "./notebook";
 import {
@@ -679,6 +680,29 @@ const POINT_TYPE_LABELS: Record<AnalysisCard["points"][number]["type"], string> 
   general: "补充",
 };
 
+const MASTERY_LABELS: Record<Exclude<MasteryLevel, "new">, string> = {
+  yes: "已掌握",
+  meh: "不确定",
+  no: "没记住",
+};
+
+// Human-readable "N 天前过 / 昨天过 / 今天过 / 从未复习" tail for the
+// mastery tag. Anchors on lastReviewedAt — mastery=new short-circuits
+// to "从未复习" regardless of level to keep the invariant honest, so
+// even if a bad import ever ships mastery=yes with a null timestamp
+// the UI won't lie.
+function masteryTag(mastery: MasteryLevel, lastReviewedAt: number | null): {
+  cls: string;
+  text: string;
+} {
+  if (mastery === "new" || lastReviewedAt === null) {
+    return { cls: "mastery-new", text: "新加 · 从未复习" };
+  }
+  const days = Math.floor((Date.now() - lastReviewedAt) / 86_400_000);
+  const dayText = days <= 0 ? "今天过" : days === 1 ? "昨天过" : `${days} 天前过`;
+  return { cls: `mastery-${mastery}`, text: `${MASTERY_LABELS[mastery]} · ${dayText}` };
+}
+
 // JLPT lookup cache lives in module scope, not `state`, because it's a
 // pure derived view of the Rust store (which itself is the disk cache).
 // Losing this Map on hot-reload is harmless — the next render pass
@@ -835,6 +859,10 @@ async function toggleStarForLine(lineIndex: number): Promise<void> {
         starredAt: now,
         updatedAt: now,
         source: "desktop",
+        // v1.1: fresh stars land in the "never reviewed" state.
+        // Yes/Meh/No only ever arrive via import from the Android side.
+        mastery: "new",
+        lastReviewedAt: null,
       };
       const stored = await saveEntry(entry);
       state.notebook.entries.set(key, stored);
@@ -995,7 +1023,13 @@ function renderNotebookEntry(entry: NotebookEntry): string {
       ${userNote}
     </div>
     <footer class="notebook-entry-foot">
-      <span class="notebook-entry-stamp mono">${fmtTimestamp(entry.starredAt)}</span>
+      <div class="notebook-entry-foot-left">
+        <span class="notebook-entry-stamp mono">${fmtTimestamp(entry.starredAt)}</span>
+        ${(() => {
+          const tag = masteryTag(entry.mastery, entry.lastReviewedAt);
+          return `<span class="mastery-tag ${tag.cls}" title="复习进度来自安卓单词本 app（read-only，桌面端不编辑）"><span class="dot" aria-hidden="true"></span>${escapeHtml(tag.text)}</span>`;
+        })()}
+      </div>
       <div class="notebook-entry-actions">
         <button type="button" data-edit-entry="${escapeHtml(entry.id)}">${entry.userNote.trim() ? "编辑备注" : "加备注"}</button>
         <button type="button" class="danger" data-remove-entry="${escapeHtml(entry.id)}">删除</button>

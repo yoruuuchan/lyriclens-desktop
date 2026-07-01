@@ -75,6 +75,41 @@ impl EntrySource {
     }
 }
 
+// v1.1 mastery: 只作为「进度日记」记安卓 review 页给出的评价，绝不
+// 参与抽卡算法（严格贴合 roadmap 上「不做 SRS」承诺）。四档 + 隐式
+// `New` 对应星标但从未 review 的默认状态。桌面 + 插件端 read-only，
+// 无评价按钮 —— Yes/Meh/No 只可能通过 import 从安卓 app 流回。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MasteryLevel {
+    Yes,
+    Meh,
+    No,
+    #[default]
+    New,
+}
+
+impl MasteryLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MasteryLevel::Yes => "yes",
+            MasteryLevel::Meh => "meh",
+            MasteryLevel::No => "no",
+            MasteryLevel::New => "new",
+        }
+    }
+
+    fn from_str(raw: &str) -> Option<Self> {
+        match raw {
+            "yes" => Some(MasteryLevel::Yes),
+            "meh" => Some(MasteryLevel::Meh),
+            "no" => Some(MasteryLevel::No),
+            "new" => Some(MasteryLevel::New),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NotebookEntry {
@@ -91,6 +126,15 @@ pub struct NotebookEntry {
     pub source: EntrySource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub import_merged_from: Option<Vec<String>>,
+    // v1.1 additive fields; pre-v1.1 exports omit both so `serde(default)`
+    // materializes MasteryLevel::New + None which matches the "never
+    // reviewed" contract. Top-level envelope schema string stays at
+    // "lyriclens.notebook.v1" — additive extensions don't bump it per
+    // the schema doc's own versioning policy.
+    #[serde(default)]
+    pub mastery: MasteryLevel,
+    #[serde(default)]
+    pub last_reviewed_at: Option<i64>,
 }
 
 pub type DbHandle = Mutex<Connection>;
@@ -107,6 +151,10 @@ pub fn open_db(path: &Path) -> Result<Connection, NotebookError> {
 }
 
 fn ensure_schema(conn: &Connection) -> Result<(), NotebookError> {
+    // Fresh installs get the columns from CREATE TABLE. Upgrades from a
+    // v1 DB (no mastery / last_reviewed_at) fall through to the ALTER
+    // block below, which is idempotent — table_info walks the current
+    // columns and only ADDs the ones missing.
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS notebook_entries (
@@ -122,6 +170,8 @@ fn ensure_schema(conn: &Connection) -> Result<(), NotebookError> {
             updated_at INTEGER NOT NULL,
             source TEXT NOT NULL,
             import_merged_from_json TEXT,
+            mastery TEXT NOT NULL DEFAULT 'new',
+            last_reviewed_at INTEGER,
             UNIQUE(song_key, line_index)
         );
 
@@ -131,6 +181,35 @@ fn ensure_schema(conn: &Connection) -> Result<(), NotebookError> {
             ON notebook_entries(starred_at);
         "#,
     )?;
+
+    // SQLite doesn't support ADD COLUMN IF NOT EXISTS. Query the current
+    // columns via PRAGMA table_info, then ADD only the ones missing so
+    // existing v1 databases upgrade in place on the next app launch. Old
+    // rows get mastery='new' (NOT NULL DEFAULT) and last_reviewed_at=NULL,
+    // which is exactly the "never reviewed" state.
+    let mut existing: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut stmt = conn.prepare("PRAGMA table_info(notebook_entries)")?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        existing.insert(name);
+    }
+    drop(rows);
+    drop(stmt);
+
+    if !existing.contains("mastery") {
+        conn.execute(
+            "ALTER TABLE notebook_entries ADD COLUMN mastery TEXT NOT NULL DEFAULT 'new'",
+            [],
+        )?;
+    }
+    if !existing.contains("last_reviewed_at") {
+        conn.execute(
+            "ALTER TABLE notebook_entries ADD COLUMN last_reviewed_at INTEGER",
+            [],
+        )?;
+    }
+
     Ok(())
 }
 
@@ -177,6 +256,17 @@ fn validate(entry: &NotebookEntry) -> Result<(), NotebookError> {
             }
         }
     }
+    // mastery is enum-validated by serde on the way in; nothing more to
+    // check here. lastReviewedAt must be a positive timestamp if set —
+    // 0/negative would fail the "must be > 0" schema doc constraint and
+    // suggests the caller passed an uninitialized default int.
+    if let Some(ts) = entry.last_reviewed_at {
+        if ts <= 0 {
+            return Err(NotebookError::Validation(format!(
+                "lastReviewedAt must be > 0 when set, got {ts}"
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -188,25 +278,23 @@ pub fn upsert(conn: &Connection, entry: &NotebookEntry) -> Result<NotebookEntry,
         .as_ref()
         .map(serde_json::to_string)
         .transpose()?;
-    let source_str = match entry.source {
-        EntrySource::Plugin => "plugin",
-        EntrySource::Desktop => "desktop",
-    };
+    let source_str = entry.source.as_str();
 
     // ON CONFLICT on (song_key, line_index): preserve the existing id,
-    // starred_at, and source. The user's first star wins for those
-    // ledger-style fields; everything else (text, card, user_note,
-    // updated_at) reflects the latest upsert. This matches the
-    // "再 star 同一行 = 更新卡片快照" use case without the import path's
-    // merge rules (those live in a separate import command, later PR).
+    // starred_at, source, AND mastery/last_reviewed_at. Re-starring a
+    // line refreshes the card snapshot but must not blow away the
+    // Android side's review progress — those two columns are excluded
+    // from the DO UPDATE clause deliberately. The `import` path uses
+    // `replace_full` instead when it needs to overwrite these.
     conn.execute(
         r#"
         INSERT INTO notebook_entries (
             id, song_key, song_title, song_artist,
             line_index, line_text, card_json, user_note,
-            starred_at, updated_at, source, import_merged_from_json
+            starred_at, updated_at, source, import_merged_from_json,
+            mastery, last_reviewed_at
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
         ON CONFLICT(song_key, line_index) DO UPDATE SET
             song_title = excluded.song_title,
             song_artist = excluded.song_artist,
@@ -229,6 +317,8 @@ pub fn upsert(conn: &Connection, entry: &NotebookEntry) -> Result<NotebookEntry,
             entry.updated_at,
             source_str,
             merged_json,
+            entry.mastery.as_str(),
+            entry.last_reviewed_at,
         ],
     )?;
 
@@ -244,7 +334,7 @@ pub fn list(conn: &Connection) -> Result<Vec<NotebookEntry>, NotebookError> {
         r#"
         SELECT id, song_key, song_title, song_artist, line_index, line_text,
                card_json, user_note, starred_at, updated_at, source,
-               import_merged_from_json
+               import_merged_from_json, mastery, last_reviewed_at
         FROM notebook_entries
         ORDER BY starred_at DESC
         "#,
@@ -471,6 +561,23 @@ pub fn merge_into(
     }
     merged.import_merged_from = Some(from);
     // 7. source 不变（合并后仍属于本地 host）
+    // 8. v1.1 mastery: 取 lastReviewedAt 更晚的一份；两边都 null 时不
+    //    覆盖（保持 local.mastery = New + null）。mastery 的权威时间戳
+    //    是独立的 last_reviewed_at，跟 starred_at / updated_at 无关。
+    match (local.last_reviewed_at, incoming.last_reviewed_at) {
+        (None, None) => {} // 双 null：保持 local
+        (Some(_), None) => {} // 只 local 有：保持 local
+        (None, Some(_)) => {
+            merged.mastery = incoming.mastery;
+            merged.last_reviewed_at = incoming.last_reviewed_at;
+        }
+        (Some(l), Some(i)) => {
+            if i > l {
+                merged.mastery = incoming.mastery;
+                merged.last_reviewed_at = incoming.last_reviewed_at;
+            }
+        }
+    }
 
     (merged, MergeOutcome::Merged)
 }
@@ -491,9 +598,10 @@ fn replace_full(conn: &Connection, entry: &NotebookEntry) -> Result<(), Notebook
         INSERT OR REPLACE INTO notebook_entries (
             id, song_key, song_title, song_artist,
             line_index, line_text, card_json, user_note,
-            starred_at, updated_at, source, import_merged_from_json
+            starred_at, updated_at, source, import_merged_from_json,
+            mastery, last_reviewed_at
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
         "#,
         params![
             entry.id,
@@ -508,6 +616,8 @@ fn replace_full(conn: &Connection, entry: &NotebookEntry) -> Result<(), Notebook
             entry.updated_at,
             entry.source.as_str(),
             merged_json,
+            entry.mastery.as_str(),
+            entry.last_reviewed_at,
         ],
     )?;
     Ok(())
@@ -607,7 +717,7 @@ fn get_by_business_key(
         r#"
         SELECT id, song_key, song_title, song_artist, line_index, line_text,
                card_json, user_note, starred_at, updated_at, source,
-               import_merged_from_json
+               import_merged_from_json, mastery, last_reviewed_at
         FROM notebook_entries
         WHERE song_key = ?1 AND line_index = ?2
         "#,
@@ -625,6 +735,8 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<NotebookEntr
     let card_json: String = row.get(6)?;
     let merged_json: Option<String> = row.get(11)?;
     let source_str: String = row.get(10)?;
+    let mastery_str: String = row.get(12)?;
+    let last_reviewed_at: Option<i64> = row.get(13)?;
 
     let card = match serde_json::from_str::<AnalysisCard>(&card_json) {
         Ok(c) => c,
@@ -646,6 +758,14 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<NotebookEntr
             ))));
         }
     };
+    let mastery = match MasteryLevel::from_str(&mastery_str) {
+        Some(m) => m,
+        None => {
+            return Ok(Err(NotebookError::Validation(format!(
+                "unknown mastery value: {mastery_str:?}"
+            ))));
+        }
+    };
 
     Ok(Ok(NotebookEntry {
         id: row.get(0)?,
@@ -660,6 +780,8 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<NotebookEntr
         updated_at: row.get(9)?,
         source,
         import_merged_from,
+        mastery,
+        last_reviewed_at,
     }))
 }
 
@@ -707,6 +829,8 @@ mod tests {
             updated_at: 1_700_000_000_000,
             source: EntrySource::Desktop,
             import_merged_from: None,
+            mastery: MasteryLevel::New,
+            last_reviewed_at: None,
         }
     }
 
@@ -1287,5 +1411,257 @@ mod tests {
         assert_eq!(summary.skipped, 1);
         assert_eq!(summary.errors.len(), 1);
         assert!(summary.errors[0].contains("uuid"));
+    }
+
+    // ─── v1.1 mastery tests ──────────────────────────────────────
+
+    #[test]
+    fn mastery_defaults_to_new_and_null_lastReviewedAt() {
+        let conn = fresh_db();
+        let entry = sample_entry(
+            "11111111-1111-4111-8111-111111111111",
+            "song-a|artist|200",
+            0,
+        );
+        // sample_entry sets mastery=New + last_reviewed_at=None.
+        upsert(&conn, &entry).unwrap();
+        let stored = list(&conn).unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].mastery, MasteryLevel::New);
+        assert_eq!(stored[0].last_reviewed_at, None);
+    }
+
+    #[test]
+    fn mastery_roundtrips_through_upsert_and_list() {
+        let conn = fresh_db();
+        let mut entry = sample_entry(
+            "11111111-1111-4111-8111-111111111111",
+            "song-a|artist|200",
+            0,
+        );
+        entry.mastery = MasteryLevel::Yes;
+        entry.last_reviewed_at = Some(1_800_000_000_000);
+        upsert(&conn, &entry).unwrap();
+        let stored = list(&conn).unwrap();
+        assert_eq!(stored[0].mastery, MasteryLevel::Yes);
+        assert_eq!(stored[0].last_reviewed_at, Some(1_800_000_000_000));
+    }
+
+    #[test]
+    fn upsert_conflict_preserves_mastery_and_lastReviewedAt() {
+        // Re-starring a line refreshes card + user_note but must not
+        // wipe the Android side's review progress.
+        let conn = fresh_db();
+        let mut first = sample_entry(
+            "11111111-1111-4111-8111-111111111111",
+            "song-a|artist|200",
+            0,
+        );
+        first.mastery = MasteryLevel::Yes;
+        first.last_reviewed_at = Some(1_800_000_000_000);
+        upsert(&conn, &first).unwrap();
+
+        // Second upsert with default mastery — imitates the "user
+        // re-stars the same line, still under mastery=new" flow. ON
+        // CONFLICT DO UPDATE deliberately omits mastery /
+        // last_reviewed_at from its excluded set.
+        let mut second = sample_entry(
+            "22222222-2222-4222-8222-222222222222",
+            "song-a|artist|200",
+            0,
+        );
+        second.user_note = "second star".into();
+        upsert(&conn, &second).unwrap();
+        let stored = list(&conn).unwrap();
+        assert_eq!(stored.len(), 1);
+        // Note updated…
+        assert_eq!(stored[0].user_note, "second star");
+        // …but mastery + last_reviewed_at preserved from first upsert.
+        assert_eq!(stored[0].mastery, MasteryLevel::Yes);
+        assert_eq!(stored[0].last_reviewed_at, Some(1_800_000_000_000));
+    }
+
+    #[test]
+    fn migration_from_v1_schema_adds_mastery_columns() {
+        // Build the v1 schema manually — no mastery, no last_reviewed_at
+        // columns — then rerun ensure_schema which should ALTER TABLE
+        // in place and stamp existing rows with the NOT NULL DEFAULT.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE notebook_entries (
+                id TEXT PRIMARY KEY,
+                song_key TEXT NOT NULL,
+                song_title TEXT NOT NULL,
+                song_artist TEXT NOT NULL,
+                line_index INTEGER NOT NULL,
+                line_text TEXT NOT NULL,
+                card_json TEXT NOT NULL,
+                user_note TEXT NOT NULL DEFAULT '',
+                starred_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                import_merged_from_json TEXT,
+                UNIQUE(song_key, line_index)
+            );
+            "#,
+        )
+        .unwrap();
+        // Drop in a fake old row so we can verify DEFAULT behavior.
+        conn.execute(
+            r#"
+            INSERT INTO notebook_entries (
+                id, song_key, song_title, song_artist,
+                line_index, line_text, card_json, user_note,
+                starred_at, updated_at, source, import_merged_from_json
+            )
+            VALUES (
+                '11111111-1111-4111-8111-111111111111',
+                'song-a|artist|200', 'Song A', 'Artist',
+                0, '歌詞', '{"index":0,"lineIndex":0,"original":"","translation":"","points":[],"note":"","startMs":null,"endMs":null}', '',
+                1000, 1000, 'desktop', NULL
+            )
+            "#,
+            [],
+        )
+        .unwrap();
+
+        // Migrate.
+        ensure_schema(&conn).unwrap();
+
+        // Old row should now surface with mastery=new + last_reviewed_at=NULL.
+        let stored = list(&conn).unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].mastery, MasteryLevel::New);
+        assert_eq!(stored[0].last_reviewed_at, None);
+
+        // Re-running ensure_schema is idempotent — no error, no drift.
+        ensure_schema(&conn).unwrap();
+        let stored_again = list(&conn).unwrap();
+        assert_eq!(stored_again.len(), 1);
+    }
+
+    #[test]
+    fn merge_takes_incoming_mastery_when_incoming_lastReviewedAt_is_newer() {
+        let local = sample_entry_with_mastery(
+            "11111111-1111-4111-8111-111111111111",
+            MasteryLevel::Yes,
+            Some(1_800_000_000_000),
+        );
+        let incoming = sample_entry_with_mastery(
+            "22222222-2222-4222-8222-222222222222",
+            MasteryLevel::No,
+            Some(1_900_000_000_000),
+        );
+        let (merged, outcome) =
+            merge_into(&local, &incoming, IMPORT_TS, "2026-07-02T00:00:00Z");
+        assert_eq!(outcome, MergeOutcome::Merged);
+        assert_eq!(merged.mastery, MasteryLevel::No);
+        assert_eq!(merged.last_reviewed_at, Some(1_900_000_000_000));
+    }
+
+    #[test]
+    fn merge_keeps_local_mastery_when_local_lastReviewedAt_is_newer() {
+        let local = sample_entry_with_mastery(
+            "11111111-1111-4111-8111-111111111111",
+            MasteryLevel::Yes,
+            Some(1_900_000_000_000),
+        );
+        let incoming = sample_entry_with_mastery(
+            "22222222-2222-4222-8222-222222222222",
+            MasteryLevel::No,
+            Some(1_800_000_000_000),
+        );
+        let (merged, _) = merge_into(&local, &incoming, IMPORT_TS, "2026-07-02T00:00:00Z");
+        assert_eq!(merged.mastery, MasteryLevel::Yes);
+        assert_eq!(merged.last_reviewed_at, Some(1_900_000_000_000));
+    }
+
+    #[test]
+    fn merge_keeps_local_when_both_lastReviewedAt_are_null() {
+        // Both entries never reviewed → merge must not overwrite the
+        // local mastery/last_reviewed_at even though the local starts
+        // as MasteryLevel::New (default).
+        let local = sample_entry_with_mastery(
+            "11111111-1111-4111-8111-111111111111",
+            MasteryLevel::New,
+            None,
+        );
+        let incoming = sample_entry_with_mastery(
+            "22222222-2222-4222-8222-222222222222",
+            MasteryLevel::New,
+            None,
+        );
+        let (merged, _) = merge_into(&local, &incoming, IMPORT_TS, "2026-07-02T00:00:00Z");
+        assert_eq!(merged.mastery, MasteryLevel::New);
+        assert_eq!(merged.last_reviewed_at, None);
+    }
+
+    #[test]
+    fn merge_adopts_incoming_when_only_incoming_has_lastReviewedAt() {
+        // Local was never reviewed; incoming was reviewed on the
+        // Android side → adopt the incoming mastery.
+        let local = sample_entry_with_mastery(
+            "11111111-1111-4111-8111-111111111111",
+            MasteryLevel::New,
+            None,
+        );
+        let incoming = sample_entry_with_mastery(
+            "22222222-2222-4222-8222-222222222222",
+            MasteryLevel::No,
+            Some(1_900_000_000_000),
+        );
+        let (merged, _) = merge_into(&local, &incoming, IMPORT_TS, "2026-07-02T00:00:00Z");
+        assert_eq!(merged.mastery, MasteryLevel::No);
+        assert_eq!(merged.last_reviewed_at, Some(1_900_000_000_000));
+    }
+
+    #[test]
+    fn merge_keeps_local_when_only_local_has_lastReviewedAt() {
+        // Reverse of the previous case — local has been reviewed, the
+        // incoming source hasn't. Local wins.
+        let local = sample_entry_with_mastery(
+            "11111111-1111-4111-8111-111111111111",
+            MasteryLevel::Yes,
+            Some(1_800_000_000_000),
+        );
+        let incoming = sample_entry_with_mastery(
+            "22222222-2222-4222-8222-222222222222",
+            MasteryLevel::New,
+            None,
+        );
+        let (merged, _) = merge_into(&local, &incoming, IMPORT_TS, "2026-07-02T00:00:00Z");
+        assert_eq!(merged.mastery, MasteryLevel::Yes);
+        assert_eq!(merged.last_reviewed_at, Some(1_800_000_000_000));
+    }
+
+    #[test]
+    fn validation_rejects_zero_lastReviewedAt() {
+        let mut entry = sample_entry(
+            "11111111-1111-4111-8111-111111111111",
+            "song-a|artist|200",
+            0,
+        );
+        entry.last_reviewed_at = Some(0);
+        let err = validate(&entry).unwrap_err();
+        assert!(
+            matches!(err, NotebookError::Validation(ref msg) if msg.contains("lastReviewedAt")),
+            "got {err:?}",
+        );
+    }
+
+    // Helper for merge tests — clones sample_entry and stamps the two
+    // v1.1 fields. `song_key` + `line_index` are identical between
+    // local and incoming so the merge path fires, matching the
+    // real-world "same lyric line, different host" case.
+    fn sample_entry_with_mastery(
+        id: &str,
+        mastery: MasteryLevel,
+        last_reviewed_at: Option<i64>,
+    ) -> NotebookEntry {
+        let mut entry = sample_entry(id, "song-shared|artist|200", 3);
+        entry.mastery = mastery;
+        entry.last_reviewed_at = last_reviewed_at;
+        entry
     }
 }
