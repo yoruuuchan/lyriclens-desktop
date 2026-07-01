@@ -548,11 +548,14 @@ function timelineHealthLabel(h: TimelineHealth): string {
 
 // ─── lyric flow ──────────────────────────────────────────────
 
+// Schema-canonical song key — same shape the notebook uses, so the
+// analysis-cache key and a notebook entry's songKey are now always
+// identical for the same NowPlaying snapshot. Pre-convergence the
+// cache stripped trim() (kept stable across this refactor by the
+// CACHE_VERSION bump in analysis-cache.ts).
 function trackKey(np: NowPlaying | null): string {
-  if (!np || !np.title) return "";
-  return `${np.title.toLowerCase()}|${np.artist.toLowerCase()}|${Math.round(
-    np.durationMs / 1000,
-  )}`;
+  if (!np?.title || !np.artist) return "";
+  return makeSongKey(np.title, np.artist, np.durationMs);
 }
 
 function formatTime(ms: number): string {
@@ -619,17 +622,9 @@ function notebookKey(songKey: string, lineIndex: number): string {
   return `${songKey}:${lineIndex}`;
 }
 
-// Schema-canonical song key — trim+lowercase title/artist + rounded
-// duration. main.ts also has trackKey() which intentionally skips trim
-// (so the existing analysis-cache keys stay stable); the two converge
-// when SMTC already returns trimmed metadata, which is the common case.
-function currentSongKey(np: NowPlaying | null): string {
-  if (!np?.title || !np.artist) return "";
-  return makeSongKey(np.title, np.artist, np.durationMs);
-}
 
 function findEntryForLine(lineIndex: number): NotebookEntry | undefined {
-  const songKey = currentSongKey(state.np);
+  const songKey = trackKey(state.np);
   if (!songKey) return undefined;
   return state.notebook.entries.get(notebookKey(songKey, lineIndex));
 }
@@ -657,7 +652,7 @@ async function toggleStarForLine(lineIndex: number): Promise<void> {
   const np = state.np;
   const card = state.analysis.cards.get(lineIndex);
   if (!np || !card) return;
-  const songKey = currentSongKey(np);
+  const songKey = trackKey(np);
   if (!songKey) return;
   if (state.starBusy.has(lineIndex)) return;
   state.starBusy.add(lineIndex);
