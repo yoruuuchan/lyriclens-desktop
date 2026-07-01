@@ -51,6 +51,7 @@ import {
   type ExamTag,
   type TargetExam,
 } from "./enexam";
+import { cefrjLookup, CEFRJ_BADGE_TITLE } from "./cefrj";
 
 const APP_VERSION = "0.1.0";
 const FEEDBACK_URL = "https://lyriclens.yoru-and-akari.dev/feedback";
@@ -885,6 +886,71 @@ function hydrateEnexamBadges(root: ParentNode): void {
   }
 }
 
+// ─── CEFR-J reference-level badge ────────────────────────────
+// Third dictionary family, and the simplest hydrator of the three:
+// no reading disambiguation (JLPT), no settings filter / re-apply
+// sweep (enexam). Unconditional render on hit, symmetric with JLPT —
+// docs/schema/cefrj-vocab.md §UI 渲染规则. Coexists with the enexam
+// badge on the same point: enexam answers "is it in my exam syllabus",
+// cefrj answers "how hard is it" — orthogonal reference info.
+
+const cefrjLookupCache = new Map<string, string | null>();
+const cefrjPendingLookups = new Map<string, Promise<string | null>>();
+
+// Slot for every vocabulary/grammar point with a surface, same
+// eligibility as JLPT/enexam. No language sniffing: Japanese surfaces
+// miss the all-lowercase-English key space naturally.
+function renderCefrjBadgeSlot(point: AnalysisCard["points"][number]): string {
+  if (point.type !== "vocabulary" && point.type !== "grammar") return "";
+  const surface = point.surface?.trim();
+  if (!surface) return "";
+  return `<span class="cefrj-badge-slot" data-word="${escapeHtml(surface)}"></span>`;
+}
+
+function applyCefrjBadge(slot: HTMLElement, level: string | null): void {
+  slot.classList.add("hydrated");
+  if (!level) {
+    // Miss → render nothing (no「未知」noise), same rule as JLPT.
+    slot.innerHTML = "";
+    return;
+  }
+  slot.innerHTML = `<span class="cefrj-badge" title="${escapeHtml(CEFRJ_BADGE_TITLE)}">${escapeHtml(level)}</span>`;
+}
+
+function hydrateCefrjBadges(root: ParentNode): void {
+  const slots = root.querySelectorAll<HTMLElement>(
+    ".cefrj-badge-slot:not(.hydrated)",
+  );
+  for (const slot of Array.from(slots)) {
+    const word = slot.dataset.word ?? "";
+    if (!word) {
+      slot.classList.add("hydrated");
+      continue;
+    }
+    const key = word.toLowerCase();
+    if (cefrjLookupCache.has(key)) {
+      applyCefrjBadge(slot, cefrjLookupCache.get(key) ?? null);
+      continue;
+    }
+    let pending = cefrjPendingLookups.get(key);
+    if (!pending) {
+      pending = cefrjLookup(word);
+      cefrjPendingLookups.set(key, pending);
+      pending
+        .then((level) => {
+          cefrjLookupCache.set(key, level);
+        })
+        .finally(() => {
+          cefrjPendingLookups.delete(key);
+        });
+    }
+    pending.then((level) => {
+      // Same detached-element tolerance as the JLPT hydrator.
+      applyCefrjBadge(slot, level);
+    });
+  }
+}
+
 // Business key that joins lyric line to NotebookEntry, mirroring the
 // UNIQUE(song_key, line_index) constraint on the Rust side. Anywhere
 // we need "is this line starred for the current song?" goes through
@@ -1023,10 +1089,11 @@ function renderAnalysisCard(card: AnalysisCard): string {
       const label = POINT_TYPE_LABELS[point.type] || POINT_TYPE_LABELS.general;
       const jlptSlot = renderJlptBadgeSlot(point);
       const enexamSlot = renderEnexamBadgeSlot(point);
+      const cefrjSlot = renderCefrjBadgeSlot(point);
       return `<div class="point-row">
         <span class="point-badge ${escapeHtml(point.type)}">${escapeHtml(label)}</span>
         <p class="point-text">${escapeHtml(point.text)}</p>
-        ${jlptSlot}${enexamSlot}
+        ${jlptSlot}${enexamSlot}${cefrjSlot}
       </div>`;
     })
     .join("");
@@ -1080,10 +1147,11 @@ function renderNotebookEntry(entry: NotebookEntry): string {
       const label = POINT_TYPE_LABELS[p.type] || POINT_TYPE_LABELS.general;
       const jlptSlot = renderJlptBadgeSlot(p);
       const enexamSlot = renderEnexamBadgeSlot(p);
+      const cefrjSlot = renderCefrjBadgeSlot(p);
       return `<div class="point-row">
         <span class="point-badge ${escapeHtml(p.type)}">${escapeHtml(label)}</span>
         <p class="point-text">${escapeHtml(p.text)}</p>
-        ${jlptSlot}${enexamSlot}
+        ${jlptSlot}${enexamSlot}${cefrjSlot}
       </div>`;
     })
     .join("");
@@ -1173,6 +1241,7 @@ function renderNotebookPanel(): void {
   listEl.innerHTML = sorted.map(renderNotebookEntry).join("");
   hydrateJlptBadges(listEl);
   hydrateEnexamBadges(listEl);
+  hydrateCefrjBadges(listEl);
   renderNotebookBatchBar();
 }
 
@@ -1774,6 +1843,7 @@ function renderLyrics() {
   // hit the lastLyricsHtml early-exit above don't re-scan.
   hydrateJlptBadges(container);
   hydrateEnexamBadges(container);
+  hydrateCefrjBadges(container);
   // Never auto-scroll while follow is paused — the whole point is to
   // let the user dwell on a card without the view dragging away.
   if (state.followPaused) return;
