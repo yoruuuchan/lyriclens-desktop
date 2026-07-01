@@ -1664,6 +1664,38 @@ button.primary:active { box-shadow: inset 2px 2px 4px rgba(0, 0, 0, 0.18); }
   color: var(--ink-4);
 }
 
+/* foot's left group holds both the starred-at stamp and the mastery
+ * tag so the actions on the right still float to the far edge via the
+ * outer flex's `justify-content: space-between`. */
+.notebook-entry-foot-left {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* mastery indicator — shared shape with the Android reviewer mock:
+ * flex row with a colored dot + label. Read-only on desktop; the
+ * dot's color IS the state, no button interaction. Values feed off
+ * the same NotebookEntry field the Android app writes. */
+.mastery-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-2xs);
+  cursor: help;
+}
+.mastery-tag .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+  flex: 0 0 auto;
+}
+.mastery-yes { color: var(--frost-500); }
+.mastery-meh { color: var(--ink-3); }
+.mastery-no  { color: var(--error-500); }
+.mastery-new { color: var(--ink-4); }
+
 .notebook-entry-actions {
   display: inline-flex;
   gap: var(--space-2);

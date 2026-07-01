@@ -14,6 +14,13 @@ import type { AnalysisCard } from "./analysis";
 
 export type EntrySource = "plugin" | "desktop";
 
+// v1.1 additive — mastery is a review-progress journal, NOT a driver
+// of any scheduling algorithm ("不做 SRS" promise, docs/roadmap/README).
+// yes/meh/no come from the Android reviewer app; `new` is the default
+// for a fresh star that hasn't been reviewed yet. Desktop + plugin
+// hosts are read-only: they render the dot, they don't offer buttons.
+export type MasteryLevel = "yes" | "meh" | "no" | "new";
+
 export type NotebookEntry = {
   id: string;
   songKey: string;
@@ -27,6 +34,11 @@ export type NotebookEntry = {
   updatedAt: number;
   source: EntrySource;
   importMergedFrom?: string[];
+  // v1.1 fields. Rust side supplies serde defaults, so an old-schema
+  // JSON that omits these still deserializes; but reading a row that
+  // round-tripped through Rust always yields a materialized value.
+  mastery: MasteryLevel;
+  lastReviewedAt: number | null;
 };
 
 // Schema-canonical songKey: title and artist are trim+lowercase, and
