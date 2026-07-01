@@ -167,6 +167,19 @@
                 <input type="text" id="cfg-target" placeholder="比如：简体中文 / 日本語 / English" spellcheck="false" />
                 <div class="field-help">想学哪个就填哪个 — 卡片的翻译和讲解会用这个语言写。</div>
               </div>
+              <div class="setting-row stack">
+                <div class="setting-copy">
+                  <strong>目标考试标签</strong>
+                  <span>英语词汇点旁显示所选考试的参考标签（社区词表交叉整理，非官方）。</span>
+                </div>
+                <div class="segmented" data-seg="targetExam">
+                  <button class="seg" data-value="off" type="button">关闭</button>
+                  <button class="seg" data-value="gaokao" type="button">高考</button>
+                  <button class="seg" data-value="cet4" type="button">CET-4</button>
+                  <button class="seg" data-value="cet6" type="button">CET-6</button>
+                  <button class="seg" data-value="kaoyan" type="button">考研</button>
+                </div>
+              </div>
               <div class="field">
                 <label>知识点</label>
                 <div class="kp-grid" id="cfg-points">
@@ -412,6 +425,27 @@
                 <span class="kv-val">MIT (repo) · CC BY (上游数据)</span>
               </div>
               <p class="about-copy" style="margin-top: var(--space-2);">词汇/语法卡片右侧的「JLPT N?」小徽章展示的是 <em>参考</em> 等级 —— 来自 Bluskyo 整理的社区词表，上游是 Jonathan Waller 的 Tanos JLPT Resources。<strong>与 JLPT 主办方（Japan Foundation / JEES）没有任何关联，也不代表官方词表。</strong>桌面端把词表压缩后放在 CDN，本地按 sha256 校验加载。</p>
+            </section>
+
+            <section class="settings-section">
+              <div class="section-title">英语考试参考标签 · 致谢</div>
+              <div class="kv-row">
+                <span class="kv-key">CET 名单</span>
+                <a class="kv-val link" href="https://github.com/JavaProgrammerLB/cet-word-list" data-external>JavaProgrammerLB/cet-word-list</a>
+              </div>
+              <div class="kv-row">
+                <span class="kv-key">级别标签</span>
+                <a class="kv-val link" href="https://github.com/skywind3000/ECDICT" data-external>skywind3000/ECDICT</a>
+              </div>
+              <div class="kv-row">
+                <span class="kv-key">高考名单</span>
+                <a class="kv-val link" href="https://github.com/pluto0x0/word3500" data-external>pluto0x0/word3500</a>
+              </div>
+              <div class="kv-row">
+                <span class="kv-key">许可</span>
+                <span class="kv-val">MIT · 交叉整理</span>
+              </div>
+              <p class="about-copy" style="margin-top: var(--space-2);">英语考试参考标签（高考 / CET-4 / CET-6 / 考研）由以上 MIT 协议开源项目交叉整理。LyricLens 仅保留单词与考试标签两个字段，不含释义、音标、例句。<strong>标签为社区整理的参考信息，与教育部教育考试院及任何考试主办方无关联，未获任何官方背书。</strong>在设置 → AI 服务 → 目标考试标签中选择考试体系后显示。</p>
             </section>
           </div>
         </div>

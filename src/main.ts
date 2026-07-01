@@ -43,6 +43,14 @@ import {
   jlptLookup,
   type JlptEntry,
 } from "./jlpt";
+import {
+  enexamLookup,
+  EXAM_TAG_LABELS,
+  EXAM_BADGE_TITLE,
+  TARGET_EXAMS,
+  type ExamTag,
+  type TargetExam,
+} from "./enexam";
 
 const APP_VERSION = "0.1.0";
 const FEEDBACK_URL = "https://lyriclens.yoru-and-akari.dev/feedback";
@@ -98,6 +106,10 @@ type Settings = {
   theme: Theme;
   fontSize: FontSize;
   panelOpacity: number; // 40-100
+  // English exam reference-tag badge: which exam system to show.
+  // "off" (default) renders no badge at all. UI preference — lives in
+  // localStorage, never in credentials.json.
+  targetExam: TargetExam;
   apiEndpoint: string;
   apiKey: string;
   modelName: string;
@@ -129,6 +141,7 @@ const DEFAULT_SETTINGS: Settings = {
   theme: "yoru",
   fontSize: "standard",
   panelOpacity: 100,
+  targetExam: "off",
   apiEndpoint: "",
   apiKey: "",
   modelName: "",
@@ -177,6 +190,9 @@ function loadSettings(): Settings {
         40,
         100,
       ),
+      targetExam: TARGET_EXAMS.includes(p.targetExam as TargetExam)
+        ? (p.targetExam as TargetExam)
+        : "off",
       apiEndpoint: typeof p.apiEndpoint === "string" ? p.apiEndpoint : "",
       apiKey: typeof p.apiKey === "string" ? p.apiKey : "",
       modelName: typeof p.modelName === "string" ? p.modelName : "",
@@ -790,6 +806,85 @@ function hydrateJlptBadges(root: ParentNode): void {
   }
 }
 
+// ─── English exam reference-tag badge ────────────────────────
+// Same two-phase slot + hydrate pattern as JLPT above. The extra
+// wrinkle is the targetExam setting: the Rust lookup returns the FULL
+// tags array and filtering happens here at apply time, so switching
+// the target exam re-labels already-fetched words without another IPC
+// round trip. Each hydrated slot records which exam it was rendered
+// for (data-applied-exam); hydrateEnexamBadges re-applies any slot
+// whose recorded exam no longer matches the current setting.
+
+const enexamLookupCache = new Map<string, string[]>();
+const enexamPendingLookups = new Map<string, Promise<string[]>>();
+
+// Slot for every vocabulary/grammar point with a surface, same
+// eligibility as JLPT. No language sniffing: the store's key space is
+// all-lowercase English, so Japanese surfaces miss naturally and the
+// slot stays empty.
+function renderEnexamBadgeSlot(point: AnalysisCard["points"][number]): string {
+  if (point.type !== "vocabulary" && point.type !== "grammar") return "";
+  const surface = point.surface?.trim();
+  if (!surface) return "";
+  return `<span class="enexam-badge-slot" data-word="${escapeHtml(surface)}"></span>`;
+}
+
+function applyEnexamBadge(slot: HTMLElement, tags: string[]): void {
+  const target = state.settings.targetExam;
+  slot.classList.add("hydrated");
+  slot.dataset.appliedExam = target;
+  // Off, miss, or hit that doesn't include the selected system → render
+  // nothing (schema doc §UI 渲染规则: 非选中体系不显示).
+  if (target === "off" || !tags.includes(target)) {
+    slot.innerHTML = "";
+    return;
+  }
+  const label = EXAM_TAG_LABELS[target as ExamTag];
+  slot.innerHTML = `<span class="enexam-badge" title="${escapeHtml(EXAM_BADGE_TITLE)}">${escapeHtml(label)}</span>`;
+}
+
+function hydrateEnexamBadges(root: ParentNode): void {
+  const target = state.settings.targetExam;
+  const slots = root.querySelectorAll<HTMLElement>(".enexam-badge-slot");
+  for (const slot of Array.from(slots)) {
+    if (slot.dataset.appliedExam === target) continue;
+    const word = slot.dataset.word ?? "";
+    if (!word) {
+      slot.classList.add("hydrated");
+      slot.dataset.appliedExam = target;
+      continue;
+    }
+    // With badges off we skip the IPC entirely — no point resolving
+    // tags nobody will see; the cache warms up if the user opts in.
+    if (target === "off") {
+      applyEnexamBadge(slot, []);
+      continue;
+    }
+    const key = word.toLowerCase();
+    const cached = enexamLookupCache.get(key);
+    if (cached) {
+      applyEnexamBadge(slot, cached);
+      continue;
+    }
+    let pending = enexamPendingLookups.get(key);
+    if (!pending) {
+      pending = enexamLookup(word);
+      enexamPendingLookups.set(key, pending);
+      pending
+        .then((tags) => {
+          enexamLookupCache.set(key, tags);
+        })
+        .finally(() => {
+          enexamPendingLookups.delete(key);
+        });
+    }
+    pending.then((tags) => {
+      // Same detached-element tolerance as the JLPT hydrator.
+      applyEnexamBadge(slot, tags);
+    });
+  }
+}
+
 // Business key that joins lyric line to NotebookEntry, mirroring the
 // UNIQUE(song_key, line_index) constraint on the Rust side. Anywhere
 // we need "is this line starred for the current song?" goes through
@@ -927,10 +1022,11 @@ function renderAnalysisCard(card: AnalysisCard): string {
     .map((point) => {
       const label = POINT_TYPE_LABELS[point.type] || POINT_TYPE_LABELS.general;
       const jlptSlot = renderJlptBadgeSlot(point);
+      const enexamSlot = renderEnexamBadgeSlot(point);
       return `<div class="point-row">
         <span class="point-badge ${escapeHtml(point.type)}">${escapeHtml(label)}</span>
         <p class="point-text">${escapeHtml(point.text)}</p>
-        ${jlptSlot}
+        ${jlptSlot}${enexamSlot}
       </div>`;
     })
     .join("");
@@ -983,10 +1079,11 @@ function renderNotebookEntry(entry: NotebookEntry): string {
     .map((p) => {
       const label = POINT_TYPE_LABELS[p.type] || POINT_TYPE_LABELS.general;
       const jlptSlot = renderJlptBadgeSlot(p);
+      const enexamSlot = renderEnexamBadgeSlot(p);
       return `<div class="point-row">
         <span class="point-badge ${escapeHtml(p.type)}">${escapeHtml(label)}</span>
         <p class="point-text">${escapeHtml(p.text)}</p>
-        ${jlptSlot}
+        ${jlptSlot}${enexamSlot}
       </div>`;
     })
     .join("");
@@ -1075,6 +1172,7 @@ function renderNotebookPanel(): void {
   );
   listEl.innerHTML = sorted.map(renderNotebookEntry).join("");
   hydrateJlptBadges(listEl);
+  hydrateEnexamBadges(listEl);
   renderNotebookBatchBar();
 }
 
@@ -1670,11 +1768,12 @@ function renderLyrics() {
   if (nextHtml === state.lastLyricsHtml) return;
   state.lastLyricsHtml = nextHtml;
   container.innerHTML = nextHtml;
-  // JLPT badge slots need a post-render pass: cache-hit slots fill in
-  // the same tick, cache-miss slots kick off an invoke and fill when it
-  // resolves. Idempotent — subsequent renderLyrics calls that hit the
-  // lastLyricsHtml early-exit above don't re-scan.
+  // JLPT/enexam badge slots need a post-render pass: cache-hit slots
+  // fill in the same tick, cache-miss slots kick off an invoke and fill
+  // when it resolves. Idempotent — subsequent renderLyrics calls that
+  // hit the lastLyricsHtml early-exit above don't re-scan.
   hydrateJlptBadges(container);
+  hydrateEnexamBadges(container);
   // Never auto-scroll while follow is paused — the whole point is to
   // let the user dwell on a card without the view dragging away.
   if (state.followPaused) return;
@@ -2093,6 +2192,7 @@ function populateForm() {
   el.fKey().value = s.apiKey;
   el.fModel().value = s.modelName;
   el.fTarget().value = s.targetLanguage;
+  setSegActive("targetExam", s.targetExam);
   setChipsActive(s.knowledgePoints);
   el.testStatus().textContent = "未测试";
   el.testStatus().className = "test-status pending";
@@ -2141,6 +2241,14 @@ function readForm(): Settings {
   const theme: Theme = themeSeg?.dataset.value === "akari" ? "akari" : "yoru";
   const fontSize: FontSize =
     (fontSeg?.dataset.value as FontSize | undefined) || "standard";
+  const examSeg = document.querySelector<HTMLButtonElement>(
+    '[data-seg="targetExam"] .seg.is-active',
+  );
+  const targetExam: TargetExam = TARGET_EXAMS.includes(
+    examSeg?.dataset.value as TargetExam,
+  )
+    ? (examSeg?.dataset.value as TargetExam)
+    : "off";
 
   const autoOn = el.tglAuto().classList.contains("is-on");
   const fbOn = el.tglFb().classList.contains("is-on");
@@ -2167,6 +2275,7 @@ function readForm(): Settings {
     theme,
     fontSize,
     panelOpacity: clamp(Number(el.sldOpacity().value) || 100, 40, 100),
+    targetExam,
     apiEndpoint: el.fEndpoint().value.trim(),
     apiKey: el.fKey().value.trim(),
     modelName: el.fModel().value.trim(),
@@ -2475,6 +2584,10 @@ function bindSettingsForm() {
     applyTheme(next.theme);
     applyFontSize(next.fontSize);
     applyOpacity(next.panelOpacity);
+    // Re-label exam badges everywhere for the (possibly) new target
+    // exam. Already-fetched words re-apply synchronously from cache;
+    // never-fetched words (badges were off until now) resolve async.
+    hydrateEnexamBadges(document);
     setDirty(false);
     showSavedToast();
     if (!next.autoAnalyze) {
