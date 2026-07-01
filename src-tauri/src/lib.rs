@@ -1,4 +1,6 @@
 mod credentials;
+mod dict_store;
+mod enexam;
 mod jlpt;
 mod lrclib;
 mod notebook;
@@ -177,6 +179,20 @@ async fn jlpt_lookup(
     Ok(guard.lookup(&surface, reading.as_deref()))
 }
 
+// English exam reference-tag lookup for the analysis card's badge.
+// Frontend passes the point's word (base form, English); Rust returns
+// the full tags array ([] on miss) and the frontend filters by the
+// user's targetExam setting — filtering client-side keeps the setting
+// a pure UI preference with no Rust round-trip on change.
+#[tauri::command]
+async fn enexam_lookup(
+    store: tauri::State<'_, tokio::sync::RwLock<enexam::EnexamStore>>,
+    word: String,
+) -> Result<Vec<String>, CmdError> {
+    let guard = store.read().await;
+    Ok(guard.lookup_tags(&word))
+}
+
 // Credentials live in a JSON file (not localStorage) so they survive
 // origin changes — dev port moves, dev vs release scheme switches.
 // See credentials.rs for the full why.
@@ -238,6 +254,27 @@ pub fn run() {
                 );
             });
 
+            // Enexam store: same empty-then-async-fill dance as JLPT.
+            // The two bootstraps run concurrently on the async runtime;
+            // each falls back to its own disk cache / empty store
+            // independently, so one CDN hiccup can't blank the other's
+            // badges.
+            let enexam_store = tokio::sync::RwLock::new(enexam::EnexamStore::empty());
+            app.manage::<tokio::sync::RwLock<enexam::EnexamStore>>(enexam_store);
+            let enexam_handle = app.handle().clone();
+            let enexam_dir = data_dir.clone();
+            tauri::async_runtime::spawn(async move {
+                let loaded = enexam::bootstrap(&enexam_dir, None, None).await;
+                let state = enexam_handle.state::<tokio::sync::RwLock<enexam::EnexamStore>>();
+                let mut guard = state.write().await;
+                *guard = loaded;
+                log::info!(
+                    "enexam: store ready, {} words loaded (version={:?})",
+                    guard.entries.len(),
+                    guard.version
+                );
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -252,6 +289,7 @@ pub fn run() {
             notebook_export_anki_to_path,
             notebook_import_from_path,
             jlpt_lookup,
+            enexam_lookup,
             credentials_read,
             credentials_write,
         ])
