@@ -43,6 +43,7 @@ LyricLens 是「一个产品，两个 host」，本仓库是 **host 2**（桌面
   - **AI 服务**：OpenAI 兼容 endpoint / key / model + "测试连接"按钮（POST 1-token ping，显示 HTTP 状态 + 延迟或人话错误）；学习偏好（目标语言 · 知识点 checkbox · 自定义 Prompt 折叠区——textarea 里预填基于当前规则生成的默认 focus 块，跟插件行为一致）
   - **高级**：卡片生成模式 · 超时 · 最大歌词行数 · 最大 Tokens · Temperature · Thinking · Response Format · 超时后自动重试 toggle + 三个重试参数
   - **关于**：版本号 · GitHub 链接（通过 tauri-plugin-opener 在系统浏览器打开） · 反馈表单（POST 到 `lyriclens.yoru-and-akari.dev/feedback`，body 带 `app: "lyriclens-desktop"` 区分来源）
+- **JLPT 参考等级 badge** — 学习卡片里 vocabulary / grammar 点右侧挂 `JLPT N?` 小徽章（primary tint outline pill），基于 [Bluskyo/JLPT_Vocabulary](https://github.com/Bluskyo/JLPT_Vocabulary)（MIT repo + Tanos CC BY 上游数据）。词表以压缩过的 JSON 走自建 `dicts.yoru-and-akari.dev` KV CDN 分发，Rust 端首启后台拉 manifest + sha256 校验 + brotli 解压 + `HashMap<surface, [entry]>` 常驻内存，`jlpt_lookup(surface, reading?)` invoke 走三步策略：`exact(surface, reading)` → `exact(surface)`（confidence 降级 `source-surface`）→ 未命中不显示。文案严格"参考等级"，跟 JLPT 主办方无关联。首次冷启动加 200-500ms 网络往返，后续命中本地 cache。同 surface 多 reading（如 `年` → とし N5 / ねん N4）保留全部候选按 N 号升序显示。
 - **笔记本** — 主页右上角 book icon 打开独立 overlay（跟设置面板同层）。学习卡片右上角 ★ 收藏当前行 → 落到 SQLite（`%APPDATA%\dev.lyriclens.desktop\notebook.sqlite`，schema 走主仓库 [`docs/schema/notebook-entry.md`](https://github.com/yoruuuchan/LyricLens/blob/main/docs/schema/notebook-entry.md) `lyriclens.notebook.v1`）。overlay 工具栏 4 按钮：
   - **刷新** 重新拉数据库快照
   - **导入 JSON** 选 v1 envelope 文件，按七步合并规则合流：`id` 保留本地 · `userNote` 用 `---来自 <source>（<iso>）---` 分隔符拼接 · `card` 取 `updatedAt` 更晚的 · `starredAt` 取更早的 · `updatedAt` 刷新为本次 import · `importMergedFrom` 追加 dedup · `source` 不变。已合并过的整条自动跳过（三条 AND：incoming.userNote 非空 + local 已含 marker + local 已含 incoming.userNote 完整字符串），toast 显示 `新 N · 合并 M · 跳过 K`
@@ -79,6 +80,7 @@ src/                  vanilla TS 前端
   analysis.ts         LLM 分析管线 + cache 读写入口
   analysis-cache.ts   localStorage FIFO 缓存（CACHE_VERSION 控制失效）
   notebook.ts         typed Rust invoke shim + makeSongKey / newEntryId
+  jlpt.ts             typed jlpt_lookup shim + badge label 格式化
   styles.css          设计系统组件 + 窗口透明度 + 各种控件
   tokens.css          设计系统 token（从 yoru-and-akari 复制过来）
   fonts/              Geist（variable）+ Geist Mono（variable）+ Noto Sans SC
@@ -87,7 +89,9 @@ src-tauri/
   src/smtc.rs         Windows SMTC 读取器
   src/lrclib.rs       LRCLIB 客户端 + LRC 解析器（重试 + 候选排序）
   src/notebook.rs     笔记本 SQLite 存储 + 七步合并规则 + Anki TSV 生成
+  src/jlpt.rs         JLPT 词表 bootstrap（manifest + sha256 + brotli）+ HashMap 三步 lookup
   tauri.conf.json     窗口 480×720、transparent: true、decorations: true
+cloudflare-worker-dicts/  dicts.yoru-and-akari.dev CDN Worker + KV 上传脚本
 cloudflare-worker/    LRCLIB 反代 Worker 源 + 部署脚本
   worker.js           /api/get、/api/search 透传 + /healthz + edge cache
   wrangler.toml       route 声明

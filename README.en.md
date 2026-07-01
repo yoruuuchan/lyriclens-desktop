@@ -41,6 +41,7 @@ The two hosts are independent complete products. If BetterNCM dies, the desktop 
   - **AI 服务**: OpenAI-compatible endpoint / key / model + live "测试连接" with HTTP status & latency; learning preferences (target language · knowledge-point checkboxes · collapsible custom-prompt editor that previews the live default focus block)
   - **高级**: card-generation mode · timeout · max lines · max tokens · temperature · thinking mode · response-format mode · fallback-on-timeout knob bundle
   - **关于**: version · GitHub link (opens in system browser) · feedback form (POSTs to `lyriclens.yoru-and-akari.dev/feedback` tagged `app: "lyriclens-desktop"`)
+- **JLPT reference-level badge** — Vocabulary and grammar points on every learning card get a `JLPT N?` mini-pill on the right, sourced from [Bluskyo/JLPT_Vocabulary](https://github.com/Bluskyo/JLPT_Vocabulary) (MIT repo + Tanos CC BY upstream data). The compressed word list ships via a self-hosted `dicts.yoru-and-akari.dev` KV CDN; on boot the Rust side pulls the manifest, sha256-verifies the versioned blob, brotli-decompresses, and keeps a `HashMap<surface, [entry]>` resident. `jlpt_lookup(surface, reading?)` follows a three-tier fallback: `exact(surface, reading)` → `exact(surface)` (confidence downgraded to `source-surface`) → nothing (no "unknown" placeholder). The wording is deliberately "reference level" — no affiliation with the JLPT organizers. First-ever cold boot pays a ~200-500 ms round trip; subsequent starts hit the disk cache. Multi-reading surfaces (e.g. `年` → とし N5 / ねん N4) surface every candidate sorted ascending by N-number.
 - **Notebook** — Top-right book icon opens a first-class overlay (peer of the settings overlay). The ★ button on any learning card saves the current line to SQLite (`%APPDATA%\dev.lyriclens.desktop\notebook.sqlite`, schema follows the parent repo's [`docs/schema/notebook-entry.md`](https://github.com/yoruuuchan/LyricLens/blob/main/docs/schema/notebook-entry.md) `lyriclens.notebook.v1`). The overlay toolbar has 4 buttons:
   - **Refresh** — reload the database snapshot
   - **Import JSON** — pick a v1 envelope file and merge per the seven-step rule: keep local `id` · concatenate `userNote` with a `---来自 <source>（<iso>）---` marker · take the newer `card` by `updatedAt` · take the earlier `starredAt` · bump `updatedAt` to now · append and dedupe `importMergedFrom` · leave `source` alone. Entries already merged from the same source are skipped in full (three-AND check: incoming.userNote non-empty + local contains the marker + local contains incoming.userNote verbatim). Toast reports `new N · merged M · skipped K`.
@@ -77,6 +78,7 @@ src/                  vanilla TS frontend
   analysis.ts         LLM analysis pipeline + cache entry points
   analysis-cache.ts   localStorage FIFO cache (CACHE_VERSION-gated)
   notebook.ts         typed Rust invoke shim + makeSongKey / newEntryId
+  jlpt.ts             typed jlpt_lookup shim + badge label formatter
   styles.css          design-system surfaces + window-alpha + components
   tokens.css          design-system tokens (verbatim from yoru-and-akari)
   fonts/              Geist (variable) + Geist Mono (variable) + Noto Sans SC
@@ -85,7 +87,9 @@ src-tauri/
   src/smtc.rs         Windows SMTC reader
   src/lrclib.rs       LRCLIB client + LRC parser (retry + candidate ranking)
   src/notebook.rs     notebook SQLite store + seven-step merge + Anki TSV writer
+  src/jlpt.rs         JLPT vocab bootstrap (manifest + sha256 + brotli) + HashMap three-tier lookup
   tauri.conf.json     window: 480×720, transparent: true, decorations: true
+cloudflare-worker-dicts/  dicts.yoru-and-akari.dev CDN Worker + KV upload scripts
 cloudflare-worker/    LRCLIB reverse-proxy Worker + deploy script
   worker.js           /api/get, /api/search passthrough + /healthz + edge cache
   wrangler.toml       route declaration

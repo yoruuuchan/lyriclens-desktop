@@ -36,6 +36,12 @@ import {
   saveEntry,
   type NotebookEntry,
 } from "./notebook";
+import {
+  ambiguityMarker,
+  formatBadgeLabel,
+  jlptLookup,
+  type JlptEntry,
+} from "./jlpt";
 
 const APP_VERSION = "0.1.0";
 const FEEDBACK_URL = "https://lyriclens.yoru-and-akari.dev/feedback";
@@ -614,6 +620,93 @@ const POINT_TYPE_LABELS: Record<AnalysisCard["points"][number]["type"], string> 
   general: "补充",
 };
 
+// JLPT lookup cache lives in module scope, not `state`, because it's a
+// pure derived view of the Rust store (which itself is the disk cache).
+// Losing this Map on hot-reload is harmless — the next render pass
+// re-populates from the Rust side in <1ms.
+const jlptLookupCache = new Map<string, JlptEntry[]>();
+const jlptPendingLookups = new Map<string, Promise<JlptEntry[]>>();
+
+function jlptSlotKey(surface: string, reading: string): string {
+  return `${surface}|${reading}`;
+}
+
+// Render an empty slot for the JLPT badge, or empty string if the point
+// isn't eligible. The actual label is filled in by hydrateJlptBadges
+// after the parent innerHTML lands — Tauri's invoke is async and the
+// render pipeline is sync string concatenation, so a two-phase pattern
+// keeps the initial paint from blocking on IPC.
+function renderJlptBadgeSlot(point: AnalysisCard["points"][number]): string {
+  if (point.type !== "vocabulary" && point.type !== "grammar") return "";
+  const surface = point.surface?.trim();
+  if (!surface) return "";
+  const reading = point.reading?.trim() ?? "";
+  // data-* attrs are read back by hydrateJlptBadges. The slot renders
+  // an empty span (no space in the DOM until badge lands) so cards
+  // without a matching JLPT entry don't leave a visible gap.
+  return `<span class="jlpt-badge-slot" data-surface="${escapeHtml(surface)}" data-reading="${escapeHtml(reading)}"></span>`;
+}
+
+function applyJlptBadge(slot: HTMLElement, entries: JlptEntry[]): void {
+  slot.classList.add("hydrated");
+  const label = formatBadgeLabel(entries);
+  if (!label) {
+    // Miss → render nothing (schema doc §UI 渲染规则:
+    // 未命中 → 不显示 badge (不显示「未知」，避免噪音)).
+    slot.innerHTML = "";
+    return;
+  }
+  const marker = ambiguityMarker(entries);
+  const display = marker ? `${label}${marker}` : label;
+  const title = marker
+    ? "JLPT 参考等级 · surface 匹配 · reading 未确认 · 数据来自 Bluskyo / Tanos community list"
+    : "JLPT 参考等级 · 数据来自 Bluskyo / Tanos community list";
+  slot.innerHTML = `<span class="jlpt-badge" title="${escapeHtml(title)}">${escapeHtml(display)}</span>`;
+}
+
+// Walk a subtree looking for un-hydrated JLPT badge slots, resolve each
+// through cache-or-invoke, and fill the resulting badge. Safe to call
+// after every renderLyrics / renderNotebookPanel — cache-hit slots are
+// filled synchronously in the same tick, so the visible flicker is
+// bounded to the length of the *first* invoke per (surface, reading).
+function hydrateJlptBadges(root: ParentNode): void {
+  const slots = root.querySelectorAll<HTMLElement>(
+    ".jlpt-badge-slot:not(.hydrated)",
+  );
+  for (const slot of Array.from(slots)) {
+    const surface = slot.dataset.surface ?? "";
+    if (!surface) {
+      slot.classList.add("hydrated");
+      continue;
+    }
+    const reading = slot.dataset.reading ?? "";
+    const key = jlptSlotKey(surface, reading);
+    const cached = jlptLookupCache.get(key);
+    if (cached) {
+      applyJlptBadge(slot, cached);
+      continue;
+    }
+    let pending = jlptPendingLookups.get(key);
+    if (!pending) {
+      pending = jlptLookup(surface, reading || undefined);
+      jlptPendingLookups.set(key, pending);
+      pending
+        .then((entries) => {
+          jlptLookupCache.set(key, entries);
+        })
+        .finally(() => {
+          jlptPendingLookups.delete(key);
+        });
+    }
+    pending.then((entries) => {
+      // The DOM may have re-rendered by now; setting innerHTML on a
+      // detached element is a no-op that costs nothing, and the next
+      // render will find the slot via cache-hit and fill it synchronously.
+      applyJlptBadge(slot, entries);
+    });
+  }
+}
+
 // Business key that joins lyric line to NotebookEntry, mirroring the
 // UNIQUE(song_key, line_index) constraint on the Rust side. Anywhere
 // we need "is this line starred for the current song?" goes through
@@ -746,9 +839,11 @@ function renderAnalysisCard(card: AnalysisCard): string {
   const points = card.points
     .map((point) => {
       const label = POINT_TYPE_LABELS[point.type] || POINT_TYPE_LABELS.general;
+      const jlptSlot = renderJlptBadgeSlot(point);
       return `<div class="point-row">
         <span class="point-badge ${escapeHtml(point.type)}">${escapeHtml(label)}</span>
         <p class="point-text">${escapeHtml(point.text)}</p>
+        ${jlptSlot}
       </div>`;
     })
     .join("");
@@ -800,9 +895,11 @@ function renderNotebookEntry(entry: NotebookEntry): string {
   const points = entry.card.points
     .map((p) => {
       const label = POINT_TYPE_LABELS[p.type] || POINT_TYPE_LABELS.general;
+      const jlptSlot = renderJlptBadgeSlot(p);
       return `<div class="point-row">
         <span class="point-badge ${escapeHtml(p.type)}">${escapeHtml(label)}</span>
         <p class="point-text">${escapeHtml(p.text)}</p>
+        ${jlptSlot}
       </div>`;
     })
     .join("");
@@ -884,6 +981,7 @@ function renderNotebookPanel(): void {
     (a, b) => b.starredAt - a.starredAt,
   );
   listEl.innerHTML = sorted.map(renderNotebookEntry).join("");
+  hydrateJlptBadges(listEl);
   renderNotebookBatchBar();
 }
 
@@ -1476,6 +1574,11 @@ function renderLyrics() {
   if (nextHtml === state.lastLyricsHtml) return;
   state.lastLyricsHtml = nextHtml;
   container.innerHTML = nextHtml;
+  // JLPT badge slots need a post-render pass: cache-hit slots fill in
+  // the same tick, cache-miss slots kick off an invoke and fill when it
+  // resolves. Idempotent — subsequent renderLyrics calls that hit the
+  // lastLyricsHtml early-exit above don't re-scan.
+  hydrateJlptBadges(container);
   // Never auto-scroll while follow is paused — the whole point is to
   // let the user dwell on a card without the view dragging away.
   if (state.followPaused) return;
