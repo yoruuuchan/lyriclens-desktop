@@ -15,7 +15,7 @@ tags: `[plan]` route decision / `[ship]` shipped functionality / `[probe]` probe
 
 ## 2026-07-01 [ship] 阶段 3 完整闭环 — JSON export + Anki TSV + JSON import + 旧债收敛
 
-桌面版第四个连续 session 收工。3 条 PR ship 到 main + 1 条本地 commit 待下窗口 push，阶段 3 的对外通路（导入 / 导出 JSON 给安卓单词本 app / 导出 Anki TSV 给复习闭环）全部就位。Yoru 真机逐 PR 验过。
+桌面版第四个连续 session 收工。4 条 PR 全 ship 到 main，阶段 3 的对外通路（导入 / 导出 JSON 给安卓单词本 app / 导出 Anki TSV 给复习闭环）全部就位。Yoru 真机逐 PR 验过。
 
 PR 列表（时间序）：
 
@@ -42,19 +42,19 @@ PR 列表（时间序）：
   - 9 个新 Rust 测试 → notebook 模块 **21 测试全过**
   - Yoru 真机三步验过：第 1 次 import 新+1，第 2 次 合并+1（userNote 拼接），第 3 次 跳过+1
 
-- **PR B (本地 commit `7b199c8`，分支 `chore/track-key-canonical-sync`，未 push)** chore(notebook): trackKey 收敛到 schema-canonical makeSongKey
+- **[#28](https://github.com/yoruuuchan/lyriclens-desktop/pull/28) chore(notebook): trackKey 收敛到 schema-canonical makeSongKey** —— 旧债收敛
   - 旧 `trackKey()` 不带 trim，schema-canonical 的 `makeSongKey()` 带 trim；divergent on edge-whitespace metadata（实测罕见但理论存在）
-  - PR：`trackKey()` 直接调 `makeSongKey()`；删 session 3 加的重复函数 `currentSongKey()`，2 处调用合并到 trackKey
+  - `trackKey()` 直接调 `makeSongKey()`；删 session 3 加的重复函数 `currentSongKey()`，2 处调用合并到 trackKey
   - `analysis-cache.ts` `CACHE_VERSION 2 → 3` 让旧 entries 自动失效，避免静默 miss-then-rewrite 浪费 token
   - 已跟 Yoru plan 确认接受一次性 LLM 重算成本
-  - 下窗口起步 30 秒 push + PR + merge
+  - session 4 提交本地 commit `7b199c8`，session 5 起步 30 秒 push + PR + merge 完成
 
 附加事件：
 
 - 本 session 中段用了 plan mode (`EnterPlanMode` + `ExitPlanMode` + `AskUserQuestion`) 跟 Yoru 把剩下 3 个 🥉 打包到 `~/.claude/plans/misty-splashing-gadget.md`，拍板了 trackKey 收敛要不要做、"跳过整条" 判定的精确条件
 - `EntrySource::as_str()` helper 提取 —— 之前 upsert / anki / replace_full 三处都写 match，集中成方法
 - 测试 mod 顶部加 `#[allow(non_snake_case)]` —— 测试名字面 embed schema 字段（`userNote`/`starredAt`/`updatedAt`/`importMergedFrom`）方便跟文档对 grep
-- README 还停在 session 2 的网络根治那版，没提任何笔记本相关 — 留给下窗口的 PR C
+- README 还停在 session 2 的网络根治那版，没提任何笔记本相关 — 留给下窗口的 PR C（session 5 已补完中英文双份，加"笔记本"一大节 + 目录结构补 notebook.rs/notebook.ts）
 - 词库基建（JLPT + CF KV，独立 vertical 1-2 天）不进阶段 3 收尾，留给下个 session 整段时间投入
 
 详细 handoff 在 `HANDOFF-2026-07-01-session4.md`（gitignored，本地）。

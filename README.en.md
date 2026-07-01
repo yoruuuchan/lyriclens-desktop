@@ -6,7 +6,7 @@ A standalone desktop companion that surfaces lyrics with LLM-powered learning no
 
 ## Status
 
-**Alpha · MVP loop wired + iterating on real-device feedback.** SMTC pulls now-playing from any Windows player that exposes it (Spotify / QQ Music / foobar2000 / Edge media / …), LRCLIB resolves the synced lyrics, the sync-scrolling lyric pane works, the 4-tab settings panel matches the BetterNCM plugin one-to-one, and OpenAI-compatible LLM cards now render inline under the active lyric line. Session 2 landed mainland-China connectivity (self-hosted CF Worker proxy for LRCLIB), LRCLIB candidate-ranking fix, and a local analysis-result cache.
+**Alpha · MVP loop wired + notebook fully closed (phase 3 done).** SMTC pulls now-playing from any Windows player that exposes it (Spotify / QQ Music / foobar2000 / Edge media / …), LRCLIB resolves the synced lyrics, the sync-scrolling lyric pane works, the 4-tab settings panel matches the BetterNCM plugin one-to-one, and OpenAI-compatible LLM cards now render inline under the active lyric line. Session 2 landed mainland-China connectivity (self-hosted CF Worker proxy for LRCLIB), LRCLIB candidate-ranking fix, and a local analysis-result cache. Session 3-4 landed the full notebook loop: SQLite store · star-to-save · note sheet · batch delete · JSON import/export · Anki TSV export · seven-step merge rule — the data path to the sibling Android review app is ready.
 
 ## Architecture
 
@@ -41,12 +41,17 @@ The two hosts are independent complete products. If BetterNCM dies, the desktop 
   - **AI 服务**: OpenAI-compatible endpoint / key / model + live "测试连接" with HTTP status & latency; learning preferences (target language · knowledge-point checkboxes · collapsible custom-prompt editor that previews the live default focus block)
   - **高级**: card-generation mode · timeout · max lines · max tokens · temperature · thinking mode · response-format mode · fallback-on-timeout knob bundle
   - **关于**: version · GitHub link (opens in system browser) · feedback form (POSTs to `lyriclens.yoru-and-akari.dev/feedback` tagged `app: "lyriclens-desktop"`)
+- **Notebook** — Top-right book icon opens a first-class overlay (peer of the settings overlay). The ★ button on any learning card saves the current line to SQLite (`%APPDATA%\dev.lyriclens.desktop\notebook.sqlite`, schema follows the parent repo's [`docs/schema/notebook-entry.md`](https://github.com/yoruuuchan/LyricLens/blob/main/docs/schema/notebook-entry.md) `lyriclens.notebook.v1`). The overlay toolbar has 4 buttons:
+  - **Refresh** — reload the database snapshot
+  - **Import JSON** — pick a v1 envelope file and merge per the seven-step rule: keep local `id` · concatenate `userNote` with a `---来自 <source>（<iso>）---` marker · take the newer `card` by `updatedAt` · take the earlier `starredAt` · bump `updatedAt` to now · append and dedupe `importMergedFrom` · leave `source` alone. Entries already merged from the same source are skipped in full (three-AND check: incoming.userNote non-empty + local contains the marker + local contains incoming.userNote verbatim). Toast reports `new N · merged M · skipped K`.
+  - **Export JSON** — writes a v1 envelope (`schema` / `exportedAt` RFC3339 UTC / `exportedFrom: "desktop"` / `entries[]`), mirror image of what the Android review app consumes.
+  - **Export Anki** — writes TSV, one entry per row → one card per row: Front `<title> — <artist><br><lineText>`, Back `translation` + blank + `<label>: <text>` per point + blank + LLM note + blank + `---` + userNote (empty sections skipped whole so no dangling `---`), Tags `lyriclens song:<sanitized_song_key> source:<source>`. Field-internal `\n → <br>` and `\t → space` keep the columns intact; Japanese/Chinese in tags round-trips fine.
+- **Note sheet** — Each entry has 加备注 / 编辑备注 to open a floating editor. Sheet uses primary tint so user notes are visually distinct from LLM notes. Closes on ESC / cancel / backdrop.
+- **Batch delete** — Per-entry checkboxes with a slide-in bar showing `已选 N / M / 全选 / 取消全选 / 删除选中`. Uses `Promise.allSettled` so one row failing doesn't take out the rest.
 
 ## What's not in the MVP yet
 
 - ⏳ Real-provider validation: enter endpoint / key / model and confirm request, parsing, and inline card render all work end to end.
-- ⏳ Favorites / `NotebookEntry` SQLite store (scaffolded but empty)
-- ⏳ Cross-host JSON import/export (schema is locked in the parent repo's [`docs/schema/notebook-entry.md`](https://github.com/yoruuuchan/LyricLens/blob/main/docs/schema/notebook-entry.md))
 - ⏳ Vocab CDN, JLPT / CEFR-J level tags
 - ⏳ Per-line card request batching (work around the 4096-token truncation)
 
@@ -68,9 +73,10 @@ In-app debugging: press **F12** or **Ctrl + Shift + I** for the webview devtools
 
 ```
 src/                  vanilla TS frontend
-  main.ts             SMTC poll loop, settings overlay, lyric render
+  main.ts             SMTC poll loop, settings + notebook overlays, lyric render
   analysis.ts         LLM analysis pipeline + cache entry points
   analysis-cache.ts   localStorage FIFO cache (CACHE_VERSION-gated)
+  notebook.ts         typed Rust invoke shim + makeSongKey / newEntryId
   styles.css          design-system surfaces + window-alpha + components
   tokens.css          design-system tokens (verbatim from yoru-and-akari)
   fonts/              Geist (variable) + Geist Mono (variable) + Noto Sans SC
@@ -78,6 +84,7 @@ src-tauri/
   src/lib.rs          Tauri commands wrapping the modules below
   src/smtc.rs         Windows SMTC reader
   src/lrclib.rs       LRCLIB client + LRC parser (retry + candidate ranking)
+  src/notebook.rs     notebook SQLite store + seven-step merge + Anki TSV writer
   tauri.conf.json     window: 480×720, transparent: true, decorations: true
 cloudflare-worker/    LRCLIB reverse-proxy Worker + deploy script
   worker.js           /api/get, /api/search passthrough + /healthz + edge cache
