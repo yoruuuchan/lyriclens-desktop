@@ -249,8 +249,67 @@ function loadSettings(): Settings {
 }
 
 function saveSettings(s: Settings) {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+  // Credentials are persisted via credentials_write on the Rust side —
+  // strip them here so localStorage never holds the API key and the
+  // two stores can't drift apart. loadSettings still *reads* legacy
+  // credential fields so pre-migration users keep their values until
+  // refreshCredentialsFromDisk writes them through to disk.
+  const { apiEndpoint, apiKey, modelName, ...prefs } = s;
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(prefs));
 }
+
+// ─── credentials (Rust-side persistence) ─────────────────────
+
+// apiEndpoint / apiKey / modelName live in credentials.json under
+// app_data_dir instead of localStorage: localStorage is per-origin, so
+// dev (http://localhost:<port>) and release (tauri://localhost) each
+// get their own copy and every build-target or dev-port switch lost
+// the key. UI preferences stay in localStorage — resetting those to
+// defaults is harmless.
+type Credentials = {
+  apiEndpoint: string;
+  apiKey: string;
+  modelName: string;
+};
+
+function persistCredentials(s: Settings): Promise<void> {
+  const creds: Credentials = {
+    apiEndpoint: s.apiEndpoint,
+    apiKey: s.apiKey,
+    modelName: s.modelName,
+  };
+  return invoke<void>("credentials_write", { creds });
+}
+
+// Runs once at module init. Disk wins over whatever loadSettings got
+// from localStorage; all-empty disk with legacy localStorage values
+// present means "pre-migration user" — write them through once so the
+// next origin change can't lose them. state is only touched after the
+// first await, i.e. after module init has finished, so referencing it
+// from here is safe.
+async function refreshCredentialsFromDisk(): Promise<void> {
+  try {
+    const disk = await invoke<Credentials>("credentials_read");
+    if (disk.apiEndpoint || disk.apiKey || disk.modelName) {
+      state.settings.apiEndpoint = disk.apiEndpoint;
+      state.settings.apiKey = disk.apiKey;
+      state.settings.modelName = disk.modelName;
+    } else if (
+      state.settings.apiEndpoint ||
+      state.settings.apiKey ||
+      state.settings.modelName
+    ) {
+      await persistCredentials(state.settings);
+    }
+  } catch (err) {
+    console.warn("credentials hydrate failed", err);
+  }
+}
+
+// Analysis awaits this so the first auto-analyze after startup can't
+// race the disk read and land in missing-config while a key sits in
+// credentials.json. Local file read — resolves in milliseconds.
+const credentialsReady = refreshCredentialsFromDisk();
 
 function normalizeEndpoint(raw: string): string {
   const v = raw.trim();
@@ -1315,6 +1374,9 @@ function isFallbackEligibleError(err: unknown): boolean {
 }
 
 async function startAnalysisForTrack(trackKeyValue: string, lines: LyricLine[]) {
+  // Settings must not be read before disk credentials have hydrated
+  // (see credentialsReady) — resolved long before any non-startup call.
+  await credentialsReady;
   const inputLines = toAnalysisInputLines(lines, state.settings.maxAnalysisLines);
   resetAnalysis(trackKeyValue);
   // Capture once: state.analysis.settingsSignature can be reset out from
@@ -2301,6 +2363,12 @@ function bindSettingsForm() {
     const nextAnalysisSignature = analysisSettingsSignature(next);
     state.settings = next;
     saveSettings(next);
+    void persistCredentials(next).catch(() => {
+      // Failed disk write means the key only lives in memory now and
+      // will be gone after restart — surface that instead of letting
+      // the earlier "已保存" toast stand unchallenged.
+      showToast("凭证写入磁盘失败 · 重启后可能需要重填 API Key");
+    });
     applyTheme(next.theme);
     applyFontSize(next.fontSize);
     applyOpacity(next.panelOpacity);
