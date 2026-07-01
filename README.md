@@ -69,7 +69,7 @@ npm run tauri dev        # dev 服务 + webview 热重载
 npm run tauri build      # 生成 release .msi，路径在 src-tauri/target/release/bundle/msi/
 ```
 
-应用内调试：debug build 默认开启 webview devtools，**F12** 或 **Ctrl + Shift + I** 打开。Vite dev 服务固定端口 1420——上次崩溃残留进程占着这个端口时，跑 `Get-NetTCPConnection -LocalPort 1420 | Stop-Process` 释放即可。
+应用内调试：debug build 默认开启 webview devtools，**F12** 或 **Ctrl + Shift + I** 打开。Vite dev 服务固定端口 5173（旧仓库文档提到过 1420，那个端口在开 Hyper-V/WSL 的 Windows 上会落进保留段，`EACCES`）——上次崩溃残留进程占着这个端口时，跑 `Get-NetTCPConnection -LocalPort 5173 | Stop-Process` 释放即可。
 
 ## 目录结构
 
