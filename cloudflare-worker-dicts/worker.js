@@ -19,16 +19,20 @@
  *
  * Cache strategy:
  *   manifest.json → 1h edge cache, cache-control: public, max-age=3600
- *   *.json.br     → immutable, cache-control: public, max-age=31536000, immutable
+ *   *.json.{br,gz} → immutable, cache-control: public, max-age=31536000, immutable
  *   /healthz      → uncached "ok"
  *   /             → uncached banner
  *   anything else → 404
  *
- * Content-Encoding: for *.json.br we serve the raw brotli-compressed
- * bytes as octet-stream and set Content-Encoding: br. Doing it this
- * way (rather than "let the reverse proxy transcode") means the Rust
- * client controls decoding and we bypass any browser-side automatic
- * decompression that would mangle a Rust-side sha256 verify.
+ * Content-Encoding: blobs are served as raw compressed bytes with
+ * Content-Type octet-stream; every client does its own
+ * sha256-then-decompress. .br keeps the historical Content-Encoding: br
+ * marker (the edge strips it in practice; the desktop Rust client never
+ * relied on it). .gz — the variant for the BetterNCM plugin host, whose
+ * Chromium 91 only has a gzip DecompressionStream — deliberately gets
+ * NO Content-Encoding: if it did, the edge/browser could transparently
+ * decompress and the plugin's sha256-of-compressed-bytes would never
+ * match the manifest.
  */
 
 const MANIFEST_CACHE_TTL_SECONDS = 3600; // 1h
@@ -86,14 +90,13 @@ export default {
       );
       response = new Response(value, { status: 200, headers });
     } else {
-      // Blobs are the brotli-compressed JSON payload. We set Content-
-      // Encoding: br so the client-side decompression pipeline knows
-      // what it's looking at, and we mark bytes-are-content by keeping
-      // Content-Type as octet-stream (an authoritative brotli extension
-      // MIME doesn't exist and using application/json here would trick
-      // reqwest into auto-decompressing before we can sha256).
+      // Blobs are compressed JSON payloads served as raw bytes
+      // (Content-Type octet-stream — application/json would trick
+      // reqwest into auto-decompressing before the client can sha256).
+      // Only .br carries the Content-Encoding marker; .gz must not,
+      // see the header comment.
       headers.set("content-type", "application/octet-stream");
-      headers.set("content-encoding", "br");
+      if (key.endsWith(".br")) headers.set("content-encoding", "br");
       headers.set(
         "cache-control",
         `public, max-age=${BLOB_CACHE_TTL_SECONDS}, s-maxage=${BLOB_CACHE_TTL_SECONDS}, immutable`
@@ -114,14 +117,14 @@ function isAllowedKey(key) {
   if (typeof key !== "string") return false;
   if (key.length === 0 || key.length > 128) return false;
   if (key.includes("..") || key.startsWith("/")) return false;
-  // families/manifest.json  or  families/*.json.br
+  // families/manifest.json  or  families/*.json.{br,gz}
   const parts = key.split("/");
   if (parts.length !== 2) return false;
   const family = parts[0];
   const file = parts[1];
   if (!/^[a-z][a-z0-9-]{0,15}$/.test(family)) return false; // "jlpt", "cefrj", ...
   if (file === "manifest.json") return true;
-  if (/^[a-zA-Z0-9._-]{1,96}\.json\.br$/.test(file)) return true;
+  if (/^[a-zA-Z0-9._-]{1,96}\.json\.(br|gz)$/.test(file)) return true;
   return false;
 }
 
