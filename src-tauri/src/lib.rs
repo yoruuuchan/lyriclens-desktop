@@ -1,3 +1,4 @@
+mod cefrj;
 mod credentials;
 mod dict_store;
 mod enexam;
@@ -193,6 +194,19 @@ async fn enexam_lookup(
     Ok(guard.lookup_tags(&word))
 }
 
+// CEFR-J reference-level lookup for the analysis card's badge.
+// Frontend passes the point's word (base form, English); Rust returns
+// the level string or null on miss. No filter setting on this one —
+// the badge renders unconditionally, symmetric with JLPT.
+#[tauri::command]
+async fn cefrj_lookup(
+    store: tauri::State<'_, tokio::sync::RwLock<cefrj::CefrjStore>>,
+    word: String,
+) -> Result<Option<String>, CmdError> {
+    let guard = store.read().await;
+    Ok(guard.lookup_level(&word))
+}
+
 // Credentials live in a JSON file (not localStorage) so they survive
 // origin changes — dev port moves, dev vs release scheme switches.
 // See credentials.rs for the full why.
@@ -275,6 +289,26 @@ pub fn run() {
                 );
             });
 
+            // Cefrj store: third family, same dance. Until the parent
+            // repo's blob lands on the CDN this bootstrap 404s and
+            // resolves to an empty store — cards simply render no
+            // CEFR badge, which is the designed degradation path.
+            let cefrj_store = tokio::sync::RwLock::new(cefrj::CefrjStore::empty());
+            app.manage::<tokio::sync::RwLock<cefrj::CefrjStore>>(cefrj_store);
+            let cefrj_handle = app.handle().clone();
+            let cefrj_dir = data_dir.clone();
+            tauri::async_runtime::spawn(async move {
+                let loaded = cefrj::bootstrap(&cefrj_dir, None, None).await;
+                let state = cefrj_handle.state::<tokio::sync::RwLock<cefrj::CefrjStore>>();
+                let mut guard = state.write().await;
+                *guard = loaded;
+                log::info!(
+                    "cefrj: store ready, {} words loaded (version={:?})",
+                    guard.entries.len(),
+                    guard.version
+                );
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -290,6 +324,7 @@ pub fn run() {
             notebook_import_from_path,
             jlpt_lookup,
             enexam_lookup,
+            cefrj_lookup,
             credentials_read,
             credentials_write,
         ])

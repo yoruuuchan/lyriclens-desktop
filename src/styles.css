@@ -515,12 +515,13 @@ body {
 
 .point-row {
   display: grid;
-  /* Third/fourth columns reserved for the optional JLPT and English-
-   * exam reference badges — `auto` collapses to 0 when a slot renders
+  /* Trailing columns reserved for the optional JLPT / English-exam /
+   * CEFR-J reference badges — `auto` collapses to 0 when a slot renders
    * empty (culture/tone/pronunciation points, or vocabulary/grammar
-   * without a dictionary hit). A point only ever fills one of the two
-   * (Japanese vs English key space), so the row never crowds. */
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+   * without a dictionary hit). Japanese points fill at most the JLPT
+   * column; English points at most enexam + cefrj (two short pills),
+   * so the row never crowds. */
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   gap: var(--space-2);
   align-items: start;
 }
@@ -578,18 +579,20 @@ body {
  * codes the point *type*, not difficulty). Empty span until the
  * async lookup completes; on miss the innerHTML stays empty and the
  * grid column collapses to zero width.
- * The English exam reference-tag badge shares the identical look —
- * both are "reference info" pills, and a point only ever matches one
- * of the two dictionaries (Japanese vs English key space). */
+ * The English exam reference-tag and CEFR-J level badges share the
+ * identical look — all are "reference info" pills. A Japanese point
+ * matches at most JLPT; an English point at most enexam + cefrj. */
 .jlpt-badge-slot,
-.enexam-badge-slot {
+.enexam-badge-slot,
+.cefrj-badge-slot {
   display: inline-flex;
   align-items: center;
   min-height: 0;
 }
 
 .jlpt-badge,
-.enexam-badge {
+.enexam-badge,
+.cefrj-badge {
   display: inline-block;
   padding: 2px var(--space-2);
   border-radius: var(--radius-pill);
