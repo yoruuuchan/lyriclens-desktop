@@ -13,6 +13,26 @@ tags: `[plan]` route decision / `[ship]` shipped functionality / `[probe]` probe
 
 ---
 
+## 2026-07-02 [ship] dicts Worker 放行 .json.gz — 插件版词库三件套的桌面侧基建
+
+桌面版第九个 session。主线是**插件版词库三件套（JLPT + enexam + CEFR-J badge）全链路收官**（主仓库主场，详见主仓库 progress 同日条），桌面仓库承担 Worker 数据通道一环。三 PR（主 [#23](https://github.com/yoruuuchan/LyricLens/pull/23)/[#24](https://github.com/yoruuuchan/LyricLens/pull/24) + 桌面 [#38](https://github.com/yoruuuchan/lyriclens-desktop/pull/38)）全 merged，KV 发布 + CDN 冒烟全绿，插件部署 NCM，**真机验收 8 步全过（Yoru 确认）**。
+
+- **[#38](https://github.com/yoruuuchan/lyriclens-desktop/pull/38) feat(dicts-worker): allow .json.gz blobs for the plugin host**
+  - 背景：NCM Chromium 91 的 `DecompressionStream` 只支持 gzip/deflate，解不了 CDN 上的裸 brotli 字节（CF 吃掉 Worker 设的 Content-Encoding，响应不触发浏览器自动解压——桌面 Rust 的 sha256 校验恰恰依赖这个行为）→ 管道加 `.json.gz` 平行变体给插件用
+  - blob allowlist `\.json\.br$` → `\.json\.(br|gz)$`；**`.gz` 响应刻意不带 Content-Encoding**——带了会被边缘/浏览器透明解压，插件对压缩字节的 sha256 必炸（Worker 里已写注释防回归）
+  - **`.br` 行为零字节改动**，桌面版无感；Worker 重新部署 ✓
+- **主仓库侧同步收官**（详见主仓库 progress 同日条）：管道 gz 变体 #23（additive manifest 字段不 bump schema；锚定 `--generated-at` 重跑与线上 br 逐字节一致）→ 插件全套 #24（dicts.js + PROMPT_VERSION v4 + 三 badge slot + targetExam 设置 + About 致谢，349 测试全绿）→ KV 发布（jlpt/cefrj 只传 gz，**br blob 永不覆盖重传**）→ CDN 冒烟 → 插件 build 部署
+- 踩坑（已写 memory `dicts-cdn-publish`）：发布前裸 URL 读 manifest 会把旧版 re-cache 一小时（token 无 Purge 权限救不回），验证一律带 `?fresh=` cache-buster
+
+附加事件：开场清了 session 8 遗留的 progress 补记双 PR（主 [#22](https://github.com/yoruuuchan/LyricLens/pull/22) + 桌面 [#37](https://github.com/yoruuuchan/lyriclens-desktop/pull/37)，均 merged）。
+
+下一站：
+- 插件版笔记本 + mastery（四件套的另一半）：IDB store + star + 备注 + 导出导入 + mastery 四色，独立大 vertical 专门 session
+- 主仓库 roadmap README 阶段地图刷新（spawn_task 卡片挂着）
+- 雅思/托福 community 弱标签（优先级最低）
+
+详细 handoff 在 `HANDOFF-2026-07-02-session9.md`（gitignored，本地）。
+
 ## 2026-07-02 [ship] CEFR-J 参考等级 badge 上线 + mastery 四色验收 + 分支大扫除
 
 桌面版第八个 session。CEFR-J vertical 一个 session 从 0 到全链路收官（主仓库管道 [#20](https://github.com/yoruuuchan/LyricLens/pull/20)/[#21](https://github.com/yoruuuchan/LyricLens/pull/21) + 桌面 [#36](https://github.com/yoruuuchan/lyriclens-desktop/pull/36) + KV 上传 + CDN 冒烟全绿），Yoru 当场拍板两个决策点（C1/C2 CC BY-SA 排除、UI 无条件显示）并 merge；mastery 四色 dot 真机验收通过（session 6 遗留正式清账）；附带两仓库分支大扫除。**决策 #12（MVP 词库 = CEFR-J 英 + JLPT 日）双语全部落地。**
