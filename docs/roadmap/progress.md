@@ -13,6 +13,42 @@ tags: `[plan]` route decision / `[ship]` shipped functionality / `[probe]` probe
 
 ---
 
+## 2026-07-02 [ship] CEFR-J 参考等级 badge 上线 + mastery 四色验收 + 分支大扫除
+
+桌面版第八个 session。CEFR-J vertical 一个 session 从 0 到全链路收官（主仓库管道 [#20](https://github.com/yoruuuchan/LyricLens/pull/20)/[#21](https://github.com/yoruuuchan/LyricLens/pull/21) + 桌面 [#36](https://github.com/yoruuuchan/lyriclens-desktop/pull/36) + KV 上传 + CDN 冒烟全绿），Yoru 当场拍板两个决策点（C1/C2 CC BY-SA 排除、UI 无条件显示）并 merge；mastery 四色 dot 真机验收通过（session 6 遗留正式清账）；附带两仓库分支大扫除。**决策 #12（MVP 词库 = CEFR-J 英 + JLPT 日）双语全部落地。**
+
+- **[#36](https://github.com/yoruuuchan/lyriclens-desktop/pull/36) feat(cefrj): CEFR-J reference-level badges (A1/A2/B1/B2)**
+  - Rust：`cefrj.rs` = enexam.rs 孪生（session 7 dict_store 泛型化直接受益），`DictStore<String>`，`lookup_level` lowercase exact match，第三并发 bootstrap。**cargo 64 全绿**（58+6 新），tsc 零错，vite build 过
+  - 前端照 JLPT pattern（命中即显示，无设置项）。**细节差异：cache 值可为 null（miss 也缓存），用 `has()` 判缓存而非 truthy**——jlpt/enexam 的 truthy 写法不能照抄
+  - `.point-row` grid 4→5 列，空 slot 塌缩；英文词可同时挂 enexam + cefrj 双 pill（考纲归属 vs 难度，正交）
+  - About 加 Tono Lab (TUFS) 致谢段（条款要求 citation）
+  - **依赖设计**：CDN 没有 `cefrj/` blob 时 bootstrap 404 → 空 store → 不渲染 badge（=断网降级路径），所以 #36 不等主仓库 #20
+- **主仓库侧同步收官**（详见主仓库 progress 同日条）：管道 PR #20（7017 keys / brotli 23.2KB，三 family 最轻）→ 拍板后 doc locked #21 → KV 上传（blob 23211 bytes）→ CDN 冒烟 sha256 匹配 / 7017 entries / 抽查全对
+- **真机验收全过**（Yoru 截图）：CEFR badge abandon→B1 / ability→A2 / acute→B2 / abolish→B2 同屏全对；**mastery 四色 dot 全对**——new「新加·从未复习」/ yes 绿「已掌握·今天过」/ meh「不确定·昨天过」/ no 红「没记住·7 天前过」。session 6→7→8 三连闭环，测试数据 4 条卡片验完可在 app 里批量勾选删除
+- **分支大扫除**（session 3 遗留销账）：桌面删 9 本地 + 11 远端，主仓库删 5 本地 + 8 远端 merged 分支，两边只剩 main
+  - 踩坑：`git push --delete` 全批中止（一个 ref 不存在整批不删，先 `git fetch --prune`）；squash-merge 分支 `--merged` 检测不到（`gh pr list --state merged` 对 headRefName）；跨仓库 `gh pr create` 必须显式 `--head`/`--base`
+
+下一站：
+- 插件版四件套同步（JLPT + mastery + enexam + cefrj）——独立大 vertical，建议专门 session
+- 雅思/托福 community 弱标签（en-exam doc 二期预留，优先级最低）
+
+详细 handoff 在 `HANDOFF-2026-07-02-session8.md`（gitignored，本地）。
+
+## 2026-07-02 [ship] enexam 考试标签 badge 全套 + dict_store 泛型化
+
+桌面版第七个 session。英语考试标签（高考/CET-4/CET-6/考研）vertical 单 session 从 0 到全链路收官：主仓库管道（[#19](https://github.com/yoruuuchan/LyricLens/pull/19)，前置 schema #18 当日稍早 merge）→ 数据上 CDN → 桌面 Rust+前端（[#35](https://github.com/yoruuuchan/lyriclens-desktop/pull/35)）。真机验收全过，成果饱和点收工（保持 session 6 节奏）。
+
+- **[#35](https://github.com/yoruuuchan/lyriclens-desktop/pull/35) feat(enexam): 英语考试参考标签 badge**，两 commit：
+  1. **refactor**：jlpt.rs 的 manifest→sha256→brotli→缓存 bootstrap 抽成泛型 `dict_store.rs`（`Envelope<V>` / `DictStore<V>`）。schema doc 预留的评估项，评估结论=抽（两边逐字节一样）；`bootstrap` 签名不变，lib.rs 零改动。CEFR-J 三期直接受益
+  2. **feat**：`enexam.rs`（lowercase exact match，返回全部 tags）+ `enexam_lookup` command + 并发第二 bootstrap；前端 `targetExam` 设置（segmented 单选 off/gaokao/cet4/cet6/kaoyan，**localStorage——UI 偏好非凭证**）+ badge slot/hydrate 两阶段（照 jlpt pattern）+ About 三源致谢
+  - 设计点：**过滤在前端 apply 时做**——Rust 返回全部 tags，换考试体系从缓存同步重标零 IPC；每 slot 记 `data-applied-exam`，保存设置后 `hydrateEnexamBadges(document)` 重扫。不做语言检测（日文词天然 miss 全英文 key space）。targetExam=off 不发 IPC
+  - **cargo 58 全绿**，tsc 零错，vite build 过
+- **主仓库侧**（详见主仓库 progress 同日条）：侦察挖出 lin-mo-han 仓库只有 20 个硬编码示例词的雷（GPT 调研 license 结论对、数据假设失实——核验必须实测数据文件）→ gaokao 互证源改 ECDICT `gk` tag（99.4% 重合）；管道 6734 词条 / brotli 25.8KB；KV + CDN 冒烟全过（abandon→["gaokao","cet4","kaoyan"] ✓）
+- **mastery 四色测试 JSON 交付**（session 6 🥈 清账）：一首假歌 4 条 entry 覆盖 new/yes/meh/no，词汇点顺手用 abandon/ability/acute/abolish 带 surface——验 #35 时可同屏看考试标签 badge，一鱼两吃。验收在 session 8 完成
+- 踩坑：repo 里 .sh 是 CRLF（`wsl bash /mnt/d/...` 直接炸，wrapper 里 `sed 's/\r$//'` 先行，已写 memory）；generatedAt 是 UTC（build tag `multi-20260701` 因跑时 UTC 未过午夜——key 与 generated_at 自洽即可）
+
+详细 handoff 在 `HANDOFF-2026-07-02-session7.md`（gitignored，本地）。
+
 ## 2026-07-02 [ship] session 5 存货清仓 + credentials 持久化 + 英语词库设计定稿
 
 桌面版第六个 session。5 个 PR merge 进 main（桌面 #30/#31/#33 + 主 #16/#17），desktop main 三个 vertical 会师、51 个 Rust 测试全绿。英语考试标签 vertical 完成调研 + schema 定稿（主 #18 open）。
